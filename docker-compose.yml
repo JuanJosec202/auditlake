@@ -32,5 +32,77 @@ services:
       sqlserver:
         condition: service_healthy
 
+  minio:
+    # MinIO ya no publica imágenes: se compila desde el tag fijado (docker/minio/Dockerfile).
+    build: docker/minio
+    image: auditlake-minio:RELEASE.2025-10-15T17-29-55Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?definir en .env}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?definir en .env}
+    # Sin puertos publicados: solo se usa dentro de la red de Compose (9000/9001 suelen estar ocupados).
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  minio-init:
+    image: amazon/aws-cli:2.22.35
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+    entrypoint: ["sh", "-c", "aws --endpoint-url http://minio:9000 s3api head-bucket --bucket warehouse 2>/dev/null || aws --endpoint-url http://minio:9000 s3 mb s3://warehouse"]
+    depends_on:
+      minio:
+        condition: service_healthy
+
+  iceberg-rest:
+    image: apache/iceberg-rest-fixture:1.8.1
+    environment:
+      # El catálogo vive en SQLite dentro de un volumen: sobrevive a reinicios (por defecto es en memoria).
+      CATALOG_URI: jdbc:sqlite:/home/iceberg/catalog.db
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+    ports:
+      - "8181:8181"
+    volumes:
+      - catalog:/home/iceberg
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+
+  spark:
+    # Job manual y en serie: docker compose run --rm spark python -m auditlake.main
+    build: docker/spark
+    image: auditlake-spark:3.5.4-iceberg1.7.1
+    profiles: ["jobs"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      AWS_REGION: us-east-1
+      OUTBOX_JDBC_URL: "jdbc:sqlserver://sqlserver:1433;databaseName=AuditLake;encrypt=true;trustServerCertificate=true"
+      OUTBOX_USER: sa
+      OUTBOX_PASSWORD: ${MSSQL_SA_PASSWORD}
+      OUTBOX_BATCH_SIZE: "1000"
+      API_URL: http://api:8080
+    volumes:
+      - ./pipelines:/app
+      - ./conf/local/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
+    depends_on:
+      sqlserver:
+        condition: service_healthy
+      iceberg-rest:
+        condition: service_started
+
 volumes:
   sqldata:
+  miniodata:
+  catalog:
