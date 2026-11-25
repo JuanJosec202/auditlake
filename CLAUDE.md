@@ -1,11 +1,14 @@
 # AuditLake: Offloading de auditoría a Lakehouse (PoC)
 
-Prueba de concepto: sacar la auditoría y los hiper-logs del core .NET 8 / SQL Server hacia un
+Prueba de concepto: sacar la auditoría y los hiper-logs del core .NET 10 / SQL Server hacia un
 Lakehouse (PySpark + Apache Iceberg + dbt + catálogo compatible con AWS Glue), dockerizado localmente.
+
+Antes de planear cualquier fase, lee también docs/design.md: contiene los porqués de cada decisión,
+los modos de falla, las pruebas de aceptación y la estructura del README.
 
 ## Alcance congelado. No agregar componentes fuera de esta lista.
 - Docker Compose: sqlserver, api, minio (+ minio-init), iceberg-rest, spark
-- .NET 8: un proyecto API (carpetas Domain/Application/Infrastructure) + un proyecto de tests
+- .NET 10 (EF Core 10): un proyecto API (carpetas Domain/Application/Infrastructure) + un proyecto de tests
 - SQL Server: audit.Outbox (sin columna de estado), audit.OutboxQuarantine, legacy.AuditLog; RCSI ON
 - Python: outbox_source, audit_sink, log_ingest, main (--backfill), maintenance.py; conf/local y conf/aws
 - Iceberg: bronze.audit_events, bronze.technical_logs, bronze.ingestion_runs
@@ -25,7 +28,7 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
    → conciliación por rango → purga en SQL por lotes.
 
 ## Reglas técnicas
-- .NET: un solo SaveChangesAsync para negocio + outbox. EventId = UUIDv7. PayloadHash = SHA-256 del payload canónico.
+- .NET: un solo SaveChangesAsync para negocio + outbox. EventId = UUIDv7 (Guid.CreateVersion7()). PayloadHash = SHA-256 del payload canónico.
 - Outbox: PK bigint IDENTITY clusterizada; la presencia de la fila significa "pendiente".
 - Worker en SQL: SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW; DELETE en lotes de 4000 por PK.
 - Lectura de la outbox: SELECT TOP (n) ... ORDER BY Id sobre filas existentes. Nunca watermark por ID máximo.
@@ -56,9 +59,9 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 - Cuando el usuario corrija una propuesta, recordarle registrarla en docs/ai-log.md.
 
 ## Fases
-1. Compose base (sqlserver, minio, minio-init, iceberg-rest) + API .NET con outbox + tests de atomicidad.
-2. Servicio spark + job de ingesta (outbox_source, audit_sink, main) + ingestion_runs + prueba de caída.
-3. Test 101/102 + make chaos (caída por punto, docker stop minio, dos workers).
+1. Compose (sqlserver, api) + API .NET 10 con outbox (DbContext directo) + 2 tests de atomicidad.
+2. minio, minio-init, iceberg-rest + servicio spark + job de ingesta (outbox_source, audit_sink, main) + ingestion_runs + prueba de caída.
+3. RCSI + ajustes de concurrencia del worker + test 101/102 + make chaos (caída por punto, docker stop minio, dos workers).
 4. Serilog + log_ingest + proyecto dbt (silver, gold, tests, conciliación) + evento v2.
 5. legacy.AuditLog + --backfill + maintenance.py (compactación, retención, snapshots).
 6. Benchmark p95 y tamaños + make demo + README.
