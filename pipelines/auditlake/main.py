@@ -14,7 +14,7 @@ from typing import Optional
 from pyspark.sql import SparkSession
 
 from auditlake import audit_sink, outbox_source
-from auditlake.classify import count_outcomes, verified_ids
+from auditlake.classify import Outcome, classify, count_outcomes, verified_ids
 from auditlake.config import Settings
 
 log = logging.getLogger("auditlake.ingest")
@@ -47,13 +47,15 @@ def run(spark: SparkSession, s: Settings, run_id: Optional[str] = None) -> RunRe
                  keys[0][0] if keys else "-", keys[-1][0] if keys else "-")
 
         if keys:
-            before = audit_sink.archived_hashes(spark, s, batch)
+            event_ids = [e for _, e, _ in keys]
+            before = audit_sink.archived_hashes(spark, s, event_ids)
             counts = count_outcomes(((e, h) for _, e, h in keys), before)
+            new_ids = [e for _, e, h in keys if classify(h, before.get(e)) is Outcome.NEW]
             result.inserted, result.duplicates, result.conflicts = (
                 counts.inserted, counts.duplicates, counts.conflicts)
 
-            if counts.inserted:
-                audit_sink.merge_new(spark, s, batch, run_id)
+            if new_ids:
+                audit_sink.merge_new(spark, s, batch, new_ids, run_id)
             log.info("run_id=%s merge: inserted=%d duplicates=%d conflicts=%d",
                      run_id, result.inserted, result.duplicates, result.conflicts)
 
@@ -61,7 +63,7 @@ def run(spark: SparkSession, s: Settings, run_id: Optional[str] = None) -> RunRe
                 raise InjectedFailure("FAIL_AFTER_ICEBERG_COMMIT=1: caída tras el commit Iceberg, antes del DELETE")
 
             # Verificación: releer Iceberg y borrar solo los IDs fijados cuyo event_id y hash coinciden.
-            after = audit_sink.archived_hashes(spark, s, batch)
+            after = audit_sink.archived_hashes(spark, s, event_ids)
             to_delete = verified_ids(keys, after)
             result.deleted = outbox_source.delete_ids(spark, s, to_delete)
             log.info("run_id=%s verified=%d deleted=%d conflicts_left_pending=%d",

@@ -28,7 +28,7 @@ Catálogo: Iceberg REST en local, Glue Data Catalog en AWS (solo cambia conf/).
 | Outbox sin columna de estado | Estado pending/confirmed | Un INSERT y un DELETE por evento, en lugar de tres escrituras |
 | Hiper-logs fuera de SQL | Hiper-logs por la outbox | Trasladaría el problema original al nuevo diseño |
 | Un único escritor, sin HA del worker | Workers activos en paralelo | El worker no tiene estado; RPO 0, RTO = reinicio + drenaje |
-| MinIO + Iceberg REST local | Glue Catalog en Docker | Glue Catalog no existe fuera de AWS; MinIO da paridad de API S3 |
+| MinIO + Iceberg REST local | Glue Catalog en Docker | Glue Catalog no existe fuera de AWS; MinIO da paridad de API S3. La edición comunitaria de MinIO ya no publica imágenes (solo código fuente): se compila desde el tag fijado `RELEASE.2025-10-15T17-29-55Z` (docker/minio). En AWS se usa Amazon S3, solo cambia conf/ |
 | dbt-spark method: session | Spark Thrift Server | Un contenedor menos |
 | Partición days(occurred_at) | Partición por event_type | Las consultas de auditoría filtran por fecha; event_type va como orden de escritura |
 | Silver/gold como vistas | Incremental | Se pasa a incremental solo si una medición lo justifica |
@@ -48,6 +48,16 @@ decisión pendiente con negocio, no se implementa.
   original (nunca UPDATE), time travel como evidencia.
 - **Retención:** DELETE de vencidos sin bloqueo legal → expire_snapshots → remove_orphan_files.
   Expirar snapshots por sí solo no elimina eventos vigentes.
+- **Búsqueda de existencia:** el ingestor busca cada event_id en bronze sin filtrar por occurred_at, así un
+  evento archivado que llega con otra fecha se clasifica como conflicto y nunca se inserta dos veces. La
+  búsqueda usa el rango [min, max] de event_id del lote + semi-join: Iceberg descarta archivos por los
+  límites de la columna (métricas `full` para event_id; un IN con más de 200 valores no se poda). Como
+  UUIDv7 ordena por tiempo, el rango de un lote toca pocos archivos (medido: 1 de 13). La poda por
+  occurred_at solo se aplica en el MERGE de los eventos ya confirmados como nuevos.
+- **Requisitos del backfill (fase 5):** cada evento histórico conserva su fecha original en occurred_at y
+  una identidad reproducible derivada de la PK de legacy.AuditLog (reejecutar da el mismo event_id). Para
+  que la búsqueda por rango siga podando, el event_id determinista debe empezar por el timestamp original
+  (forma UUIDv7/v8 con prefijo de tiempo), no ser un hash aleatorio.
 - **Evolución de esquema:** identidad estable, campos opcionales, schema_version; silver lee v1 y v2.
 - **Calidad (dbt):** unique/not_null en event_id, accepted_values en event_type, test de conciliación
   read_count = inserted + duplicates + conflicts.
