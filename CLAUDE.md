@@ -44,8 +44,9 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 - Prueba de caída: variable FAIL_AFTER_ICEBERG_COMMIT=1 lanza una excepción entre el commit Iceberg y el DELETE.
 
 ## Buenas prácticas
-- SOLID sin ceremonia: el caso de uso decide qué se audita; IAuditTrail (Application) lo registra;
-  EfAuditTrail (Infrastructure) serializa, calcula el hash y lo agrega al DbContext sin llamar SaveChanges.
+- SOLID sin ceremonia: el caso de uso usa AuditLakeDbContext directamente (sin repositorios ni IAuditTrail),
+  decide qué se audita y agrega OutboxMessage.Create(evento) al contexto; OutboxMessage serializa el payload
+  canónico y calcula el hash. Un solo SaveChangesAsync al final del caso de uso.
 - Nombres de negocio (TransferApproved, no LogEntry). TimeProvider para fechas. IOptions para configuración.
 - Python: lógica en funciones puras (p. ej. classify), I/O en los bordes, type hints, ruff, logs con run_id.
 - Tests: atomicidad de la outbox, orden de commit 101/102 (Testcontainers), classify, tests dbt.
@@ -61,7 +62,7 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 ## Fases
 1. Compose (sqlserver, api) + API .NET 10 con outbox (DbContext directo) + 2 tests de atomicidad.
 2. minio, minio-init, iceberg-rest + servicio spark + job de ingesta (outbox_source, audit_sink, main) + ingestion_runs + prueba de caída.
-3. RCSI + ajustes de concurrencia del worker + test 101/102 + make chaos (caída por punto, docker stop minio, dos workers).
+3. RCSI solo si la medición de contención lo justifica + ajustes de concurrencia del worker + test 101/102 + make chaos (caída por punto, docker stop minio, dos workers).
 4. Serilog + log_ingest + proyecto dbt (silver, gold, tests, conciliación) + evento v2.
 5. legacy.AuditLog + --backfill + maintenance.py (compactación, retención, snapshots).
 6. Benchmark p95 y tamaños + make demo + README.
