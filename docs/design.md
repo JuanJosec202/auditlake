@@ -79,8 +79,13 @@ decisión pendiente con negocio, no se implementa.
 | Falla dbt o mantenimiento | La ingesta sigue | Corregir y reejecutar | No |
 | Se pierden archivos de hiper-logs | Ruta best effort | Aceptado y documentado | Posible (decisión explícita) |
 
-**Bloqueos en SQL:** línea base sin RCSI (EF Core crea la base con RCSI ON; la migración RcsiOffBaseline
-lo deja en OFF hasta la medición de la fase 6). El worker lee con `WITH (READPAST)`: salta las filas de
+**Bloqueos en SQL:** línea base sin RCSI. Cuando EF Core crea la base (MigrateAsync / database update sobre
+una base inexistente), ejecuta `CREATE DATABASE [x]; IF SERVERPROPERTY('EngineEdition') <> 5 BEGIN ALTER
+DATABASE [x] SET READ_COMMITTED_SNAPSHOT ON; END;` (SqlServerMigrationsSqlGenerator, capturado con
+`dotnet ef database update --verbose`). La migración `RcsiOffBaseline` ejecuta, fuera de transacción
+(`suppressTransaction: true`), `ALTER DATABASE CURRENT SET READ_COMMITTED_SNAPSHOT OFF WITH ROLLBACK
+IMMEDIATE`; su Down lo vuelve a ON. Verificado: is_read_committed_snapshot_on = 1 tras InitialOutbox y 0 tras
+RcsiOffBaseline. Así la línea base queda en OFF hasta la medición de la fase 6. El worker lee con `WITH (READPAST)`: salta las filas de
 transacciones abiertas de la API y las toma en la siguiente pasada (caso 101/102). DELETE en lotes de 4000
 por PK (bajo la escalada de 5000). `SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW` solo en las sesiones
 del worker (sessionInitStatement de Spark y sus conexiones JDBC); la API no cambia. Purga del histórico
@@ -97,11 +102,22 @@ detecta con la edad del pendiente más antiguo en audit.Outbox.
 - Contención: con una transacción de la API abierta, la lectura sin READPAST quedó bloqueada 5,1 s hasta
   el LOCK_TIMEOUT (error 1222); con READPAST no esperó y tomó la fila en la pasada siguiente.
 - RCSI: EF Core lo había activado al crear la base; la línea base quedó en OFF de forma explícita.
-- MinIO caído: la corrida falló tras 346 s (timeout de lectura del catálogo REST, que no puede leer los
-  metadatos en S3), las 5 filas siguieron pendientes y el reintento las archivó (inserted=5, 0 duplicados en
-  la conciliación por event_id). Archivos huérfanos: no se observaron (39 .parquet en MinIO = 39
-  referenciados por snapshots); la fase 5 igual programa remove_orphan_files. Pendiente evaluar un timeout
-  de catálogo más corto para fallar antes.
+- MinIO caído, primera medición: la corrida falló a los 346 s. El tiempo se iba en el servidor REST, que
+  al cargar la tabla reintenta leer el metadata.json en S3 (hasta 20 reintentos con backoff de hasta ~5 s,
+  más los reintentos del SDK de AWS), mientras el cliente esperaba: ~170 s hasta el timeout de socket del
+  primer GET (CREATE TABLE IF NOT EXISTS) y ~156 s más en el segundo GET (registro de la corrida fallida),
+  hasta que el servidor se rindió con UnknownHostException.
+- Ajuste en conf/local/spark-defaults.conf: `rest.client.connection-timeout-ms=5000`,
+  `rest.client.socket-timeout-ms=20000`, `rest.client.max-retries=2` y, para lecturas directas de S3,
+  `s3.retry.num-retries=2`, `s3.retry.min-wait-ms=500`, `s3.retry.max-wait-ms=2000`. Segunda medición:
+  indisponibilidad detectada a los 24 s del primer acceso al catálogo (53 s de contenedor en total, que
+  incluyen el arranque de Spark y el intento de registrar la corrida fallida); las 5 filas siguieron
+  pendientes y el reintento las archivó (inserted=5, deleted=5, 0 duplicados en la conciliación por event_id).
+  En AWS los valores se revisan aparte en conf/aws (Glue Catalog y S3 tienen otra latencia).
+- Archivos huérfanos: no se observaron (39 .parquet en MinIO = 39 referenciados por snapshots) porque el
+  fallo ocurrió antes de escribir datos: la corrida no pasó de cargar la tabla. Una ejecución que alcance a
+  escribir archivos de datos y falle antes de publicar el snapshot sí puede dejarlos sin referencia; su
+  limpieza (remove_orphan_files con un margen de antigüedad seguro) queda para la fase 5.
 
 **Monitoreo:** edad del pendiente más antiguo (métrica principal), filas en la outbox y espacio libre,
 corridas fallidas en ingestion_runs, filas en cuarentena > 0, archivos por partición.

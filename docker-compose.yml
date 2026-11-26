@@ -8,7 +8,7 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?definir en .env}
     ports:
-      - "1433:1433"
+      - "14333:1433"   # 1433 en el host suele estar ocupado por un SQL Server local
     volumes:
       - sqldata:/var/opt/mssql
     healthcheck:

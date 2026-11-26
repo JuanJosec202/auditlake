@@ -53,6 +53,7 @@ def run(spark: SparkSession, s: Settings, run_id: Optional[str] = None) -> RunRe
 
     started = datetime.now(timezone.utc)
     try:
+        log.info("run_id=%s acceso al catálogo Iceberg", run_id)
         audit_sink.ensure_tables(spark, s)
         _process(spark, s, result)
         audit_sink.record_run(spark, s, _run_row(result, started, None))
