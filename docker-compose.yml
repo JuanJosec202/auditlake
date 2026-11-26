@@ -29,9 +29,10 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ApplyMigrationsOnStartup: "true"
+      Audit__Sink: ${AUDIT_SINK:-Outbox}   # LegacyTable solo para el benchmark complementario
       ConnectionStrings__AuditLake: "Server=sqlserver,1433;Database=AuditLake;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True"
     volumes:
-      - ./data/logs:/app/logs     # hiper-logs Serilog (CLEF); los lee log_ingest
+      - applogs:/app/logs         # hiper-logs Serilog (CLEF); los lee log_ingest
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -94,11 +95,12 @@ services:
       OUTBOX_USER: sa
       OUTBOX_PASSWORD: ${MSSQL_SA_PASSWORD}
       OUTBOX_BATCH_SIZE: "1000"
+      OUTBOX_READ_HINT: ${OUTBOX_READ_HINT-READPAST}
       API_URL: http://api:8080
     volumes:
       - ./pipelines:/app
       - ./dbt:/dbt
-      - ./data/logs:/data/logs
+      - applogs:/data/logs
       - spark-checkpoints:/data/checkpoints
       - ./conf/local/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./conf/local/maintenance.json:/opt/spark/conf/maintenance.json:ro
@@ -116,3 +118,4 @@ volumes:
   miniodata:
   catalog:
   spark-checkpoints:
+  applogs:

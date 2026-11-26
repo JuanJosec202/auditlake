@@ -81,9 +81,11 @@ decisión pendiente con negocio, no se implementa.
   (may–oct): corrida 1 inserted=36.800; corrida 2 del mismo rango inserted=0, duplicates=36.800. La
   conciliación recalcula (event_id, payload_hash) desde SQL y la purga vuelve a conciliar justo antes de
   borrar: solo se eliminan filas que todavía coinciden, en lotes de 1.000 con WAITFOR DELAY (una fila
-  alterada en SQL tras el backfill quedó sin purgar). Tras el backfill, un lote normal siguió escaneando
+  alterada en SQL tras el backfill quedó sin purgar). Una fila con discrepancia (hash_mismatch o
+  missing_in_bronze) permanece en legacy.AuditLog para revisión humana: no se reescribe bronze ni se fuerza la
+  purga; se decide caso a caso (en la PoC, la fila Id=12345 quedó en SQL). Tras el backfill, un lote normal siguió escaneando
   pocos archivos (9 de 262 antes de compactar, 2 de 194 después).
-- **Hiper-logs (fase 4):** Serilog escribe CLEF (RenderedCompactJsonFormatter) en `data/logs/active`, con
+- **Hiper-logs (fase 4):** Serilog escribe CLEF (RenderedCompactJsonFormatter) en `active/` del volumen `applogs`, con
   rotación por minuto como configuración de demo (en producción, por hora o por tamaño). `log_ingest` primero
   sella: mueve a `ready/` solo archivos cuyo periodo terminó hace al menos 1 minuto y nunca el activo (el más
   reciente), porque Spark recuerda cada archivo por ruta y no relee lo que se agregue después. Luego
