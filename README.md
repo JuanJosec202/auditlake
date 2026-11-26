@@ -12,13 +12,14 @@ pruebas .NET, el SDK de .NET 10.
 
 ```bash
 git clone https://github.com/JuanJosec202/auditlake.git && cd auditlake
-cp .env.example .env
-docker compose -p auditlake-demo run --build --rm spark python -m auditlake.demo
+docker compose -p auditlake-demo -f docker-compose.yml run --build --rm spark python -m auditlake.demo
 ```
 
-`-p auditlake-demo` crea un proyecto aislado: contenedores, red y volúmenes propios (`auditlake-demo_*`). El
-Compose base no publica puertos, así que puede correr junto al stack de desarrollo sin mezclar datos. Para
-borrar la demo: `docker compose -p auditlake-demo down -v`.
+No hace falta ningún paso previo: sin `.env`, el Compose usa credenciales de demo válidas solo para este entorno
+local (para cambiarlas, copia `.env.example` a `.env`). `-p auditlake-demo` crea un proyecto aislado
+(contenedores, red y volúmenes `auditlake-demo_*`) y `-f docker-compose.yml` usa solo el Compose base, que no
+publica puertos, así que la demo puede correr junto al stack de desarrollo sin mezclar datos. Para borrar la demo:
+`docker compose -p auditlake-demo -f docker-compose.yml down -v`.
 
 La demo siembra 36.800 eventos históricos en `legacy.AuditLog`, aprueba 200 transferencias por la API, ejecuta
 el ingestor, el backfill dos veces (idempotencia), la conciliación y purga del histórico, `log_ingest`,
@@ -41,8 +42,8 @@ Para no repetir `-f`, `.env.example` incluye comentadas `COMPOSE_FILE` y `COMPOS
 desarrollo, porque las pruebas aplican retención y expiran snapshots):
 
 ```bash
-docker compose -p auditlake-demo run --rm spark sh -c "ruff check . && pytest -q"
-docker compose -p auditlake-demo run --rm spark sh -c "cd /dbt && dbt build --profiles-dir /dbt"
+docker compose -p auditlake-demo -f docker-compose.yml run --rm spark sh -c "ruff check . && pytest -q"
+docker compose -p auditlake-demo -f docker-compose.yml run --rm spark sh -c "cd /dbt && dbt build --profiles-dir /dbt"
 dotnet test
 ```
 
