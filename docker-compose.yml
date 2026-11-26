@@ -28,6 +28,8 @@ services:
       ConnectionStrings__AuditLake: "Server=sqlserver,1433;Database=AuditLake;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True"
     ports:
       - "8080:8080"
+    volumes:
+      - ./data/logs:/app/logs     # hiper-logs Serilog (CLEF); los lee log_ingest
     depends_on:
       sqlserver:
         condition: service_healthy
@@ -95,6 +97,9 @@ services:
       API_URL: http://api:8080
     volumes:
       - ./pipelines:/app
+      - ./dbt:/dbt
+      - ./data/logs:/data/logs
+      - spark-checkpoints:/data/checkpoints
       - ./conf/local/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
     depends_on:
       sqlserver:
@@ -106,3 +111,4 @@ volumes:
   sqldata:
   miniodata:
   catalog:
+  spark-checkpoints:

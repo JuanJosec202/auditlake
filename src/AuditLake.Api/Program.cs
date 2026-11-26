@@ -2,8 +2,13 @@ using AuditLake.Api.Application;
 using AuditLake.Api.Domain;
 using AuditLake.Api.Infrastructure;
 using Microsoft.EntityFrameworkCore;
+using Serilog;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// Hiper-logs (best effort): Serilog JSON (CLEF) a archivos rotados; nunca pasan por SQL Server.
+// La rotación por minuto es configuración de demo (appsettings.json).
+builder.Services.AddSerilog((services, lc) => lc.ReadFrom.Configuration(builder.Configuration));
 
 builder.Services.AddDbContext<AuditLakeDbContext>(o =>
     o.UseSqlServer(builder.Configuration.GetConnectionString("AuditLake")));
@@ -11,6 +16,8 @@ builder.Services.AddSingleton(TimeProvider.System);
 builder.Services.AddScoped<ApproveTransfer>();
 
 var app = builder.Build();
+
+app.UseSerilogRequestLogging();
 
 if (app.Configuration.GetValue<bool>("ApplyMigrationsOnStartup"))
 {

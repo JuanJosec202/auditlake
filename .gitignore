@@ -483,3 +483,6 @@ $RECYCLE.BIN/
 
 # Local secrets
 .env
+
+# Datos locales (hiper-logs de la demo)
+data/
