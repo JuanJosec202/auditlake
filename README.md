@@ -3,18 +3,7 @@
 Prueba de concepto para sacar la auditoría y los hiper-logs de un core .NET 10 / SQL Server hacia un
 Lakehouse (PySpark + Apache Iceberg + dbt, con catálogo compatible con AWS Glue), dockerizada en local.
 
-## 1. Resumen para negocio
-
-Las tablas de auditoría crecen sin control dentro de SQL Server y, cuando alguien las consulta, compiten con
-las operaciones del negocio. Con AuditLake, SQL Server conserva solo los eventos pendientes de los últimos
-minutos (outbox transaccional: un evento de auditoría confirmado no se pierde mientras SQL Server tenga
-capacidad para persistirlo; los hiper-logs de diagnóstico son best effort) y el histórico pasa a Iceberg,
-donde se consulta y se retiene con reglas gobernadas. Valor medido: aprobando transferencias mientras corre una consulta histórica sobre
-1 millón de eventos, el p95 del core fue de **283,6 ms con el histórico en SQL frente a 38,7 ms con el histórico
-en Iceberg** (28,6 ms sin consulta), y SQL deja de crecer. El almacenamiento se comprimió ~1,6x; el ahorro de
-almacenamiento existe, pero no es el argumento principal.
-
-## 2. Cómo levantar el entorno
+## 1. Cómo levantar el entorno
 
 **Requisitos:** Docker Desktop (o Docker Engine con Compose v2) con ~8 GB de memoria asignada (probado con 7,6 GiB), y Git. Para las
 pruebas .NET, el SDK de .NET 10.
@@ -64,7 +53,7 @@ outbox con Testcontainers. No hay `make chaos`: cada caída se prueba por separa
 **Benchmark:** `pipelines/benchmarks/run.sh setup|baseline|sql|iceberg|legacy-table|rcsi …` en el proyecto
 aislado `auditlake-bench` con los límites de `docker-compose.bench.yml`.
 
-## 3. Arquitectura
+## 2. Arquitectura
 
 ```mermaid
 flowchart LR
@@ -96,7 +85,7 @@ flowchart LR
 Catálogo: Iceberg REST en local, Glue Data Catalog en AWS. Capa analítica: dbt (`dbt-spark`, `method: session`)
 con silver y gold como vistas.
 
-## 4. Decisiones y trade-offs
+## 3. Decisiones y trade-offs
 
 | Decisión | Alternativa descartada | Motivo |
 |---|---|---|
@@ -116,7 +105,7 @@ con silver y gold como vistas.
 **Fuera de alcance:** Kafka, Debezium/CDC, Airflow, MediatR/CQRS, repositorio genérico sobre EF, varios proyectos
 .NET por capa, Lake Formation local, buffer en memoria, gold incremental, imagen de Glue en el Compose, Makefile.
 
-## 5. Diseño del Lakehouse
+## 4. Diseño del Lakehouse
 
 - **bronze.audit_events:** Iceberg v2, partición oculta `days(occurred_at)`, orden de escritura
   `event_type, occurred_at`, payload como texto JSON + `schema_version` + `payload_hash`, métricas `full` para
@@ -140,7 +129,7 @@ con silver y gold como vistas.
   `months` daría archivos de ~14–15 MB y 12 veces menos particiones; `days` se justifica desde el orden de
   1 millón de eventos por día. La demo mantiene `days`.
 
-## 6. Resiliencia y modos de falla
+## 5. Resiliencia y modos de falla
 
 | Falla | Comportamiento | Evidencia |
 |---|---|---|
@@ -157,7 +146,7 @@ con silver y gold como vistas.
 tumbaba la JVM de Spark (SIGSEGV en Java 11 y 17), y el catálogo local sobre SQLite devuelve 500 en algunos
 commits concurrentes. En AWS se usan el runtime de Glue y Glue Data Catalog.
 
-## 7. Pruebas de aceptación con mediciones reales
+## 6. Pruebas de aceptación con mediciones reales
 
 Benchmark: 1.000.040 eventos históricos, 5 corridas de 5.000 aprobaciones, concurrencia 8, 0 errores; límites
 por servicio: sqlserver 2 CPU / 2,5 GiB, api 2 CPU / 512 MiB, spark 2 CPU / 3 GiB por contenedor.
@@ -215,7 +204,7 @@ Decisión: RCSI OFF. EF Core lo activa al crear la base; la migración `RcsiOffB
 El almacenamiento solo compensa el costo fijo del job a volúmenes altos; la frecuencia se elige por frescura y
 tamaño de outbox. El detalle de tarifas, fuentes y supuestos está en `docs/design.md` (sección 9).
 
-## 8. Respuestas a las cuatro preguntas
+## 7. Respuestas a las cuatro preguntas
 
 **1. ¿Cuándo se vuelve problemático conservar y consultar el histórico en SQL Server y con qué métrica se mide el costo-beneficio de moverlo a Iceberg?**
 Se vuelve problemático cuando el histórico se consulta en la misma instancia que atiende al core y cuando crece
@@ -272,7 +261,7 @@ usa directamente y la serialización y el hash viven solo en `OutboxMessage.Crea
 `1f7b352` y `b40a390`, y la prueba de atomicidad en la que un CHECK real revierte la aprobación
 ([`ApproveTransferAtomicityTests.cs`](tests/AuditLake.Api.Tests/ApproveTransferAtomicityTests.cs)).
 
-## 9. Uso de IA
+## 8. Uso de IA
 
 Resumen de [`docs/ai-log.md`](docs/ai-log.md), que tiene las 18 entradas con su evidencia.
 
@@ -306,7 +295,7 @@ MinIO, las pruebas de integración, la causa raíz de fallos de infraestructura 
 de sobreingeniería, la identidad de los eventos, la corrección de datos, la decisión de medir antes de activar
 RCSI y la elección de qué medir para demostrar valor de negocio.
 
-## 10. Despliegue en AWS
+## 9. Despliegue en AWS
 
 El mismo código está preparado para AWS cambiando solo la configuración; la referencia está en
 [`conf/aws`](conf/aws/README.md) y **no se ejecutó en una cuenta de AWS**:
