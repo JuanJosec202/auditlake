@@ -29,5 +29,22 @@ public sealed class AuditLakeDbContext(DbContextOptions<AuditLakeDbContext> opti
             e.Property(o => o.Payload).HasColumnType("nvarchar(max)");
             e.Property(o => o.PayloadHash).HasColumnType("char(64)");
         });
+
+        modelBuilder.Entity<OutboxQuarantineEntry>(e =>
+        {
+            e.ToTable("OutboxQuarantine", "audit");
+            e.HasKey(q => q.Id).IsClustered();
+            e.Property(q => q.Id).UseIdentityColumn();
+            e.Property(q => q.EventType).HasMaxLength(200);
+            e.Property(q => q.Payload).HasColumnType("nvarchar(max)");
+            e.Property(q => q.PayloadHash).HasColumnType("char(64)");
+            e.Property(q => q.ArchivedHash).HasColumnType("char(64)");
+            e.Property(q => q.Reason).HasMaxLength(200);
+            e.Property(q => q.RunId).HasMaxLength(64);
+            e.Property(q => q.QuarantinedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
+            e.HasIndex(q => q.EventId);
+        });
     }
+
+    public DbSet<OutboxQuarantineEntry> OutboxQuarantine => Set<OutboxQuarantineEntry>();
 }
