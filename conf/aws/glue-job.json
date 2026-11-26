@@ -1,0 +1,26 @@
+{
+  "_comment": "Referencia NO EJECUTADA para: aws glue create-job --cli-input-json file://conf/aws/glue-job.json. Reemplazar <bucket>, <role-arn> y <sqlserver-connection>. Pasos en conf/aws/README.md.",
+  "Name": "auditlake-ingest",
+  "Role": "<role-arn>",
+  "GlueVersion": "5.0",
+  "WorkerType": "G.1X",
+  "NumberOfWorkers": 2,
+  "Timeout": 15,
+  "ExecutionProperty": { "MaxConcurrentRuns": 1 },
+  "Connections": { "Connections": ["<sqlserver-connection>"] },
+  "Command": {
+    "Name": "glueetl",
+    "PythonVersion": "3",
+    "ScriptLocation": "s3://<bucket>/jobs/glue_entry.py"
+  },
+  "DefaultArguments": {
+    "--job-language": "python",
+    "--datalake-formats": "iceberg",
+    "--extra-py-files": "s3://<bucket>/jobs/auditlake.zip",
+    "--extra-jars": "s3://<bucket>/jars/mssql-jdbc-12.8.1.jre11.jar",
+    "--conf": "spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions --conf spark.sql.defaultCatalog=lake --conf spark.sql.catalog.lake=org.apache.iceberg.spark.SparkCatalog --conf spark.sql.catalog.lake.catalog-impl=org.apache.iceberg.aws.glue.GlueCatalog --conf spark.sql.catalog.lake.warehouse=s3://<bucket>/warehouse/ --conf spark.sql.catalog.lake.io-impl=org.apache.iceberg.aws.s3.S3FileIO --conf spark.sql.session.timeZone=UTC --conf spark.sql.iceberg.vectorization.enabled=false",
+    "--OUTBOX_JDBC_URL": "jdbc:sqlserver://<host>:1433;databaseName=AuditLake;encrypt=true",
+    "--OUTBOX_SECRET_ID": "auditlake/sqlserver",
+    "--OUTBOX_BATCH_SIZE": "1000"
+  }
+}

@@ -58,7 +58,7 @@ Reglas que impuse desde el inicio:
 - **Tipo:** error de diseño propio, detectado en revisión
 - **Problema:** como la lectura es `ORDER BY Id`, una sola fila en conflicto bloquearía el drenaje de toda la outbox para siempre (poison message), y SQL volvería a acumular auditoría.
 - **Decisión humana:** contar el conflicto y continuar con el resto del lote; en la Fase 3, mover la fila a `audit.OutboxQuarantine`.
-- **Evidencia:** `test_conflict_stays_pending_and_run_continues` (`inserted=1, conflicts=1, deleted=1`).
+- **Evidencia:** `test_conflict_stays_pending_and_run_continues` (`inserted=1, conflicts=1, deleted=1`; commit `a17e012`). En la Fase 3 la prueba pasó a `test_conflict_goes_to_quarantine_and_batch_advances` (`pipelines/tests/test_ingest.py`), que además verifica la cuarentena.
 
 ### 6. Fase 2: búsqueda por `event_id` y poda por fecha
 - **Herramientas:** Claude Code y Claude (chat)

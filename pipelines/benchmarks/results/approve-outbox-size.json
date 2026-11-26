@@ -1,0 +1,18 @@
+{
+  "label": "outbox-size",
+  "n_per_run": 20000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 20000,
+      "errors": 0,
+      "p50_ms": 10.9,
+      "p95_ms": 30.8,
+      "max_ms": 472.3,
+      "run": 1,
+      "seconds": 44.1,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 30.8
+}
