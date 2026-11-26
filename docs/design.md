@@ -65,9 +65,11 @@ decisión pendiente con negocio, no se implementa.
   `readStream` con `trigger(availableNow=True)` y checkpoint persistente (volumen `spark-checkpoints`; en AWS,
   S3) escribe en bronze.technical_logs; una segunda corrida sin archivos nuevos da numInputRows=0.
   `cleanSource=archive` mueve a `archive/` (fuera de `ready/`) los archivos de un batch cuando el siguiente
-  batch se confirma; con availableNow eso ocurre en la corrida siguiente que procese datos (medido: los
-  archivos de la corrida 1 se archivaron en la corrida 3). Un archivo ya registrado en el checkpoint no se
-  vuelve a leer aunque siga en `ready/`.
+  batch se confirma; con availableNow eso ocurre en la corrida siguiente que procese datos. Medido: la
+  segunda corrida con el mismo checkpoint procesó cero filas (numInputRows=0, bronze sin cambios) y los
+  archivos de la corrida 1 se archivaron recién en la corrida 3, la primera posterior que procesó datos. Se
+  mantiene `cleanSource=archive`; un archivo ya registrado en el checkpoint no se vuelve a leer aunque siga
+  en `ready/`.
 - **Silver y gold (dbt, vistas):** silver.audit_events normaliza TransferApproved v1
   (`transferId, amount, approvedBy`, moneda desconocida) y v2 (`transfer.id, transfer.amount.{value,currency},
   approver.userId`). gold.audit_daily agrupa por día, tipo de evento y moneda; el grupo v1 queda con
@@ -75,6 +77,9 @@ decisión pendiente con negocio, no se implementa.
   not_null de event_id y la conciliación de corridas como `error`; not_null de transfer_id y amount como
   `warn` con store_failures (tabla Iceberg en dbt_test__audit). Conciliación: en corridas `succeeded` con
   quarantined no nulo, read_count = inserted + duplicates + conflicts y conflicts = quarantined.
+  La prueba del payload malformado lo borra de bronze al terminar (DELETE de Iceberg) solo como limpieza
+  de la prueba. En operación el original se conserva durante su plazo de retención y una corrección se
+  registra como un evento nuevo que referencia al original; bronze no se edita.
 - **Evolución de esquema:** identidad estable, campos opcionales, schema_version; silver lee v1 y v2.
 - **Calidad (dbt):** unique/not_null en event_id, accepted_values en event_type, test de conciliación
   read_count = inserted + duplicates + conflicts.
