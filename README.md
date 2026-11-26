@@ -254,16 +254,23 @@ checkpoint evita releerlos, pero un archivo perdido no se recupera.
 **4. ¿Qué sugerencia de IA se corrigió, quién tomó la decisión y qué evidencia demuestra el resultado?**
 Caso principal (entrada 14 de `docs/ai-log.md`): ChatGPT sugirió dos veces generar el `event_id` del histórico
 como UUIDv5 a partir de sistema, tabla y PK. Un UUIDv5 no tiene orden temporal y rompería la búsqueda por rango
-de `event_id` que poda archivos. La decisión fue mía: UUIDv7 determinista, con los ms de `occurred_at` y el resto
-derivado de SHA-256 de sistema, tabla y PK. Evidencia: tras el backfill, un lote normal escanea 9 de 262 archivos
-(2 de 194 tras compactar) y repetir el backfill da `inserted=0, duplicates=36800` (commit `9a3c011`).
-_Prompt original: pendiente de completar por el autor._
+de `event_id` que poda archivos. La decisión fue mía, con esta instrucción de corrección: «No pidas UUIDv5: el
+plan ya hace lo correcto». El plan mantuvo un UUIDv7 determinista, con los ms de `occurred_at` y el resto derivado
+de SHA-256 de sistema, tabla y PK (`legacy_event_id` en
+[`pipelines/auditlake/classify.py`](pipelines/auditlake/classify.py)). Evidencia (commit `9a3c011`):
+- Replay: repetir el backfill del mismo rango da `inserted=0, duplicates=36800`
+  ([`test_backfill_same_range_twice_then_purge_only_verified`](pipelines/tests/test_maintenance.py) y la demo).
+- Poda: tras el backfill, un lote normal escanea 9 de 262 archivos, y 2 de 194 tras compactar
+  ([`docs/design.md`](docs/design.md), secciones 4 y 9;
+  [`test_event_id_lookup_skips_files_of_other_days`](pipelines/tests/test_ingest.py)).
+- Identidad: [`test_legacy_identity.py`](pipelines/tests/test_legacy_identity.py) verifica que el ID es
+  determinista, versión 7 y ordenado por `occurred_at`.
 
 Segundo caso (entrada 3): el plan de Claude Code para la Fase 1 incluía `ITransferRepository` e `IUnitOfWork`
 sobre EF Core. Lo rechacé por sobreingeniería: el `DbContext` ya es unidad de trabajo, así que el caso de uso lo
 usa directamente y la serialización y el hash viven solo en `OutboxMessage.Create`. Evidencia: commits
-`1f7b352` y `b40a390`, y la prueba de atomicidad en la que un CHECK real revierte la aprobación.
-_Prompt original: pendiente de completar por el autor._
+`1f7b352` y `b40a390`, y la prueba de atomicidad en la que un CHECK real revierte la aprobación
+([`ApproveTransferAtomicityTests.cs`](tests/AuditLake.Api.Tests/ApproveTransferAtomicityTests.cs)).
 
 ## 9. Uso de IA
 
@@ -278,8 +285,7 @@ Resumen de [`docs/ai-log.md`](docs/ai-log.md), que tiene las 18 entradas con su 
 Reglas desde el inicio: alcance congelado en `CLAUDE.md`, ninguna fase sin plan aprobado ni cierre sin la salida
 real de las pruebas, y ningún "debería funcionar" sin ejecutarlo.
 
-**Decisiones clave** (la bitácora registra el prompt original solo en la entrada 1; los demás están pendientes de
-completar por el autor)
+**Decisiones clave**
 - Revisión de la propuesta inicial: la IA señaló huecos (hiper-logs sin ruta, tres escrituras por evento, MERGE
   sin poda, Glue Catalog fuera de Docker) y el alcance se congeló (entrada 1).
 - Correcciones humanas a propuestas de la IA: pasar a .NET 10 en lugar de compilar net8.0 con el SDK 9 (2), usar
@@ -306,9 +312,9 @@ El mismo código está preparado para AWS cambiando solo la configuración; la r
 [`conf/aws`](conf/aws/README.md) y **no se ejecutó en una cuenta de AWS**:
 - **Job PySpark** en **AWS Glue 5.0** (Spark 3.5.4, Iceberg 1.7.1, la misma combinación validada en Docker):
   `conf/aws/glue-job.json` define el job con `MaxConcurrentRuns=1`, timeout, 2 workers G.1X, la conexión a SQL
-  Server y las propiedades de Iceberg; `conf/aws/README.md` describe los pasos (artefactos en S3, secreto,
-  script de entrada que traslada los parámetros del job a las variables que lee `auditlake/config.py`). El
-  `sp_getapplock` por tabla sigue coordinando los escritores.
+  Server y las propiedades de Iceberg; `conf/aws/glue_entry.py` es el script de entrada que traslada los
+  parámetros del job a las variables que lee `auditlake/config.py` (sintaxis validada, sin ejecutar en Glue), y
+  `conf/aws/README.md` describe los pasos. El `sp_getapplock` por tabla sigue coordinando los escritores.
 - **Catálogo y almacenamiento:** Glue Data Catalog (`GlueCatalog`) y S3 en lugar de Iceberg REST y MinIO
   (`conf/aws/spark-defaults.conf`).
 - **dbt** con el adaptador dbt-glue, ejecutado desde un contenedor (ECS o CodeBuild) disparado por EventBridge

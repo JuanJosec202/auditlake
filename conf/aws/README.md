@@ -7,6 +7,7 @@ configuración de referencia: **no se desplegaron ni se ejecutaron en una cuenta
 | Archivo | Uso |
 |---|---|
 | `spark-defaults.conf` | Propiedades de Spark/Iceberg para GlueCatalog + S3 (spark-submit en EMR o prueba manual) |
+| `glue_entry.py` | Script de entrada del job (sintaxis validada, sin ejecutar en Glue) |
 | `glue-job.json` | Definición del Glue Job (Glue 5.0, `MaxConcurrentRuns=1`, timeout, conexión a SQL Server) para `aws glue create-job --cli-input-json` |
 
 ## Pasos para ejecutar el job existente en Glue
@@ -20,22 +21,12 @@ configuración de referencia: **no se desplegaron ni se ejecutaron en una cuenta
    cd pipelines && zip -r ../auditlake.zip auditlake && cd ..
    aws s3 cp auditlake.zip s3://<bucket>/jobs/auditlake.zip
    aws s3 cp mssql-jdbc-12.8.1.jre11.jar s3://<bucket>/jars/   # el mismo JAR que usa docker/spark/Dockerfile
-   aws s3 cp glue_entry.py s3://<bucket>/jobs/glue_entry.py
+   aws s3 cp conf/aws/glue_entry.py s3://<bucket>/jobs/glue_entry.py
    ```
-4. **Script de entrada (`glue_entry.py`, no incluido en el repo):** el job lee su configuración de variables de
-   entorno (`auditlake/config.py`) y Glue entrega parámetros `--CLAVE`. El script de entrada solo los traslada
-   y llama al mismo `main`:
-   ```python
-   import json, os, sys
-   import boto3
-   from awsglue.utils import getResolvedOptions
-   args = getResolvedOptions(sys.argv, ["OUTBOX_JDBC_URL", "OUTBOX_SECRET_ID", "OUTBOX_BATCH_SIZE"])
-   secret = json.loads(boto3.client("secretsmanager").get_secret_value(SecretId=args["OUTBOX_SECRET_ID"])["SecretString"])
-   os.environ.update(OUTBOX_JDBC_URL=args["OUTBOX_JDBC_URL"], OUTBOX_USER=secret["username"],
-                     OUTBOX_PASSWORD=secret["password"], OUTBOX_BATCH_SIZE=args["OUTBOX_BATCH_SIZE"])
-   from auditlake.main import main
-   main([])
-   ```
+4. **Script de entrada ([`glue_entry.py`](glue_entry.py)):** el job lee su configuración de variables de entorno
+   (`auditlake/config.py`) y Glue entrega parámetros `--CLAVE`. El script traslada los parámetros y las
+   credenciales de Secrets Manager a variables de entorno y llama al mismo `main` que corre en Docker. Solo se
+   validó su sintaxis (`python -m py_compile` y `ruff check`); no se ejecutó en Glue.
 5. **Job:** `aws glue create-job --cli-input-json file://conf/aws/glue-job.json` (reemplazando los marcadores) y
    un trigger programado de Glue con la frecuencia elegida (ver la sensibilidad 5/15/60 min en
    `docs/design.md` §9). `MaxConcurrentRuns=1` evita corridas solapadas; el `sp_getapplock` por tabla sigue
