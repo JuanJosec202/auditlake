@@ -31,7 +31,8 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 - .NET: un solo SaveChangesAsync para negocio + outbox. EventId = UUIDv7 (Guid.CreateVersion7()). PayloadHash = SHA-256 del payload canónico.
 - Outbox: PK bigint IDENTITY clusterizada; la presencia de la fila significa "pendiente".
 - Worker en SQL: SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW solo en sus sesiones; DELETE en lotes de 4000 por PK.
-- Un solo ingestor: sp_getapplock exclusivo (Session, timeout 0) antes de leer; el segundo arranque sale sin procesar.
+- Un escritor por tabla con sp_getapplock exclusivo (Session, timeout 0): `auditlake:audit_events` (ingestor, backfill,
+  purga y mantenimiento de audit_events) y `auditlake:technical_logs` (log_ingest y su retención). Quien no lo obtiene sale.
 - Lectura de la outbox: SELECT TOP (n) ... WITH (READPAST) ORDER BY Id sobre filas existentes. Nunca watermark por ID máximo.
 - Lote materializado antes de escribir (cache + count) para evitar re-evaluación JDBC.
 - Búsqueda de existencia por rango de event_id + semi-join, sin filtrar por occurred_at (métricas full de event_id).
@@ -67,7 +68,8 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 2. minio, minio-init, iceberg-rest + servicio spark + job de ingesta (outbox_source, audit_sink, main) + ingestion_runs + prueba de caída.
 3. Cuarentena + READPAST y ajustes de sesión del worker + test 101/102 + ingestor único (sp_getapplock) + caídas (tras commit Iceberg, MinIO caído) + main --reconcile. Sin RCSI.
 4. Serilog + log_ingest + proyecto dbt (silver, gold, tests, conciliación) + evento v2.
-5. legacy.AuditLog + --backfill + maintenance.py (compactación, retención, snapshots).
+5. legacy.AuditLog + --backfill (UUIDv7 determinista) + purga verificada + maintenance.py (compactación, manifests
+   condicionado, retención con bloqueo legal, expire_snapshots, huérfanos con file_list_view).
 6. Benchmark p95 y tamaños + comparación con y sin RCSI (contención medida, usando la evidencia de la fase 3 en docs/design.md):
    validar la lectura del worker con RCSI activo; si se quiere conservar el comportamiento de READPAST,
    probar la variante WITH (READCOMMITTEDLOCK, READPAST) + make demo + README.

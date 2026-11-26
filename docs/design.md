@@ -42,22 +42,47 @@ decisión pendiente con negocio, no se implementa.
   columnas comunes tipadas + payload (texto JSON) + schema_version + payload_hash.
 - **bronze.technical_logs:** partición days(ts), retención 30-90 días.
 - **bronze.ingestion_runs:** run_id, read_count, inserted, duplicates, conflicts, deleted.
-- **Archivos pequeños:** rewrite_data_files por umbral de archivos por partición + rewrite_manifests,
-  fuera de la ventana de ingesta.
+- **Archivos pequeños:** `maintenance.py compact` ejecuta rewrite_data_files (strategy sort por event_type,
+  occurred_at; min-input-files=2) con el lock de la tabla, así nunca corre a la vez que su escritor. Medido:
+  262 → 192 archivos, máximo por partición 25 → 1, y los pares (event_id, payload_hash) del snapshot anterior
+  y del actual son idénticos (37.695 = 37.695, 0 faltantes, 0 sobrantes). La búsqueda de un lote normal pasó
+  de 9 a 2 archivos escaneados. rewrite_manifests solo corre si el conteo de manifests supera el umbral
+  configurado (observado: 10 manifests ≤ 50, se omitió).
+- **Coordinación de escritores:** un sp_getapplock por tabla. `auditlake:audit_events`: ingestor, backfill,
+  purga del histórico y mantenimiento de audit_events. `auditlake:technical_logs`: log_ingest y la
+  retención de technical_logs. Quien no obtiene el lock sale sin escribir.
 - **ACID:** commits por snapshot, único escritor, correcciones como eventos nuevos que referencian al
   original (nunca UPDATE), time travel como evidencia.
-- **Retención:** DELETE de vencidos sin bloqueo legal → expire_snapshots → remove_orphan_files.
-  Expirar snapshots por sí solo no elimina eventos vigentes.
+- **Retención:** plazos configurables en conf/local/maintenance.json (audit_events 365 días en la demo,
+  technical_logs 30). DELETE de vencidos sin bloqueo legal → expire_snapshots → remove_orphan_files. El
+  DELETE solo publica un snapshot nuevo: lo borrado sigue legible con time travel hasta que expire_snapshots
+  elimina los snapshots que lo contenían (medido: el vencido aparece con VERSION AS OF el snapshot previo
+  al DELETE y, tras expirar, la consulta falla con "Cannot find snapshot"). Expirar snapshots por sí solo no
+  elimina eventos vigentes. Los bloqueos legales están en conf/ solo para la PoC; en producción vendrían de
+  una fuente gobernada (sistema de casos legales o tabla con aprobación y auditoría), leída por el job.
+- **Huérfanos:** remove_orphan_files lista la ubicación de la tabla con el FileSystem de Hadoop; la imagen
+  trae Hadoop 3.3.4 sin hadoop-aws ("No FileSystem for scheme s3"). En lugar de agregar JARs se usa
+  `file_list_view`: el listado real se obtiene con S3FileIO.listPrefix de Iceberg y se pasa al procedimiento
+  como vista. Vía operativa: procedimiento con older_than de 3 días y dry_run primero. El procedimiento
+  rechaza intervalos menores a 24 h, así que el ensayo con un archivo recién creado usa la Action API (la vía
+  que el propio error indica) solo en el namespace sandbox: dry_run con una función de borrado que solo
+  registra la ruta, luego la limpieza real; los archivos referenciados y las filas siguen disponibles.
 - **Búsqueda de existencia:** el ingestor busca cada event_id en bronze sin filtrar por occurred_at, así un
   evento archivado que llega con otra fecha se clasifica como conflicto y nunca se inserta dos veces. La
   búsqueda usa el rango [min, max] de event_id del lote + semi-join: Iceberg descarta archivos por los
   límites de la columna (métricas `full` para event_id; un IN con más de 200 valores no se poda). Como
   UUIDv7 ordena por tiempo, el rango de un lote toca pocos archivos (medido: 1 de 13). La poda por
   occurred_at solo se aplica en el MERGE de los eventos ya confirmados como nuevos.
-- **Requisitos del backfill (fase 5):** cada evento histórico conserva su fecha original en occurred_at y
-  una identidad reproducible derivada de la PK de legacy.AuditLog (reejecutar da el mismo event_id). Para
-  que la búsqueda por rango siga podando, el event_id determinista debe empezar por el timestamp original
-  (forma UUIDv7/v8 con prefijo de tiempo), no ser un hash aleatorio.
+- **Backfill (fase 5):** cada evento histórico conserva su fecha original en occurred_at y su event_id es un
+  UUIDv7 determinista: 48 bits con los ms de occurred_at y los 74 bits restantes de SHA-256 de
+  `sqlserver:AuditLake/legacy.AuditLog/<Id>` (no UUIDv5: la búsqueda por rango depende del orden temporal).
+  El payload es v1 canónico (to_json con orden fijo de campos) y payload_hash = sha2(payload, 256). Se
+  procesa por meses con la misma búsqueda por rango y MERGE que el ingestor. Medido con 36.800 filas
+  (may–oct): corrida 1 inserted=36.800; corrida 2 del mismo rango inserted=0, duplicates=36.800. La
+  conciliación recalcula (event_id, payload_hash) desde SQL y la purga vuelve a conciliar justo antes de
+  borrar: solo se eliminan filas que todavía coinciden, en lotes de 1.000 con WAITFOR DELAY (una fila
+  alterada en SQL tras el backfill quedó sin purgar). Tras el backfill, un lote normal siguió escaneando
+  pocos archivos (9 de 262 antes de compactar, 2 de 194 después).
 - **Hiper-logs (fase 4):** Serilog escribe CLEF (RenderedCompactJsonFormatter) en `data/logs/active`, con
   rotación por minuto como configuración de demo (en producción, por hora o por tamaño). `log_ingest` primero
   sella: mueve a `ready/` solo archivos cuyo periodo terminó hace al menos 1 minuto y nunca el activo (el más
@@ -139,7 +164,8 @@ detecta con la edad del pendiente más antiguo en audit.Outbox.
 - Archivos huérfanos: no se observaron (39 .parquet en MinIO = 39 referenciados por snapshots) porque el
   fallo ocurrió antes de escribir datos: la corrida no pasó de cargar la tabla. Una ejecución que alcance a
   escribir archivos de datos y falle antes de publicar el snapshot sí puede dejarlos sin referencia; su
-  limpieza (remove_orphan_files con un margen de antigüedad seguro) queda para la fase 5.
+  limpieza (remove_orphan_files con un margen de antigüedad seguro) se implementó en la fase 5 (ver
+  Huérfanos).
 
 **Monitoreo:** edad del pendiente más antiguo (métrica principal), filas en la outbox y espacio libre,
 corridas fallidas en ingestion_runs, filas en cuarentena > 0, archivos por partición.
