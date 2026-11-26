@@ -234,3 +234,94 @@ vistas). dbt se ejecutaría desde un contenedor (tarea de ECS o CodeBuild) dispa
 job de ingesta, con `dbt build` y el mismo proyecto. Las vistas Spark registradas en Glue no se consultan desde
 Athena: si negocio necesita gold desde Athena, se materializa como tabla o se usa dbt-athena con el SQL
 adaptado a Trino.
+
+## 9. Mediciones de la fase 6
+
+Plataforma: Windows 11 Pro 10.0.26300, Intel i7-1360P (12 núcleos / 16 hilos), 15,7 GB RAM; Docker Desktop
+27.0.3 con 16 CPU y 7,6 GiB asignados. Límites por servicio en el benchmark (docker-compose.bench.yml):
+sqlserver 2 CPU / 2,5 GiB; api 2 CPU / 512 MiB; minio 1 CPU / 512 MiB; iceberg-rest 1 CPU / 768 MiB; cada
+contenedor spark 2 CPU / 3 GiB (driver 1,5 GiB, `local[2]`). El stack de desarrollo y el de la demo estaban
+detenidos durante el benchmark.
+
+**Demo** (`docker compose -p auditlake-demo run --build --rm spark python -m auditlake.demo`, desde un clon
+limpio): en frío, sin imágenes ni caché de build, 786 s de punta a punta, de los cuales 166 s son la demo y
+~620 s la primera descarga, construcción (incluida la compilación de MinIO) y arranque. En caliente y con el
+stack de desarrollo encendido: 257 s (188 s de demo), con datos separados (dev 38.021 filas en bronze, demo
+37.000; volúmenes `auditlake_*` y `auditlake-demo_*`).
+
+**Rendimiento** (1.000.040 filas históricas de may–oct; 5 corridas de 5.000 aprobaciones, concurrencia 8,
+500 de calentamiento; 0 errores en todas):
+
+| Escenario | p50 (mediana) | p95 (mediana de 5 corridas) |
+|---|---|---|
+| Sin consulta histórica | 15,1 ms | 28,6 ms |
+| Histórico consultado en SQL Server (bucle) | 15,9 ms | 283,6 ms |
+| Histórico en Iceberg (bucle en Spark) + ingestor activo | 18,6 ms | 38,7 ms |
+| Complementario: auditoría escrita en tabla SQL en vez de outbox | 16,5 ms | 30,1 ms |
+
+La misma consulta (totales diarios de 184 días) devolvió los mismos 184 totales en SQL y en Iceberg
+(1.000.040 filas, 2.507.365.514,02). Latencia de la consulta: SQL p50 545 ms / p95 930 ms; Spark p50 4,0 s /
+p95 6,1 s, y la primera 25 s porque incluye el arranque de Spark. A esta escala local el arranque y la
+planificación de Spark dominan su tiempo; lo que se mide es que la analítica deja de competir con el core:
+con el histórico consultado en SQL el p95 de aprobar se multiplica por ~10, con el histórico en Iceberg queda
+cerca de la línea base aunque el ingestor archive en paralelo (23.000 eventos en ese escenario). Escribir la
+auditoría en una tabla SQL frente a la outbox no cambió el p95 a esta escala (30 vs 29 ms): la diferencia del
+diseño no está en la escritura sino en no retener ni consultar el histórico en SQL.
+
+**RCSI** (ingestor activo con 42–46 corridas por variante y la misma carga de aprobaciones):
+
+| Variante | Consulta del worker | p95 | Esperas LCK_M | Muestras con bloqueo | 101/102 |
+|---|---|---|---|---|---|
+| RCSI OFF | `WITH (READPAST)` | 23,1 ms | 0 | 2 / 548 | ok |
+| RCSI ON | `WITH (READPAST)` (compatibilidad) | 37,7 ms | 0 | 1 / 681 | ok |
+| RCSI ON | `WITH (READCOMMITTEDLOCK, READPAST)` | 31,3 ms | 0 | 0 / 631 | ok |
+| RCSI ON | sin hint (lectura versionada) | 30,5 ms | 0 | 2 / 638 | ok |
+
+Decisión: RCSI queda en OFF. Con READPAST el worker no espera por las transacciones abiertas de la API en
+ninguna variante (0 esperas LCK_M), las diferencias de p95 están dentro de la variación entre corridas
+(todas las variantes tienen corridas sueltas de ~100 ms) y RCSI agrega el versionado en tempdb y 14 bytes
+por fila modificada sin un beneficio medido. La única contención observada fue la lectura sin READPAST de la
+fase 3 (bloqueada 5 s hasta LOCK_TIMEOUT). Si se activa RCSI por otras cargas del core, la variante a usar es
+`WITH (READCOMMITTEDLOCK, READPAST)`, que mantiene explícito el comportamiento validado.
+
+**Almacenamiento** (mismas 1.000.040 filas antes de purgar): `sp_spaceused 'legacy.AuditLog'` = 141.648 KB
+reservados (datos 114.352 KB, índices 24.512 KB) frente a 89.832.683 bytes (85,7 MiB) de Parquet en
+bronze.audit_events para ese rango, ya compactado (zstd), aunque bronze guarda además el payload JSON como
+texto (141 MB sin comprimir), event_id y payload_hash.
+
+**Costo estimado** (estimación, no medición; tarifas us-east-1 de la AWS Price List API, publicación del
+25-11-2026, consultadas el 26-11-2026): S3 Standard 0,023 USD/GB-mes, PUT 0,005 USD/1.000, GET 0,0004 USD/1.000;
+Glue ETL (Glue 5) 0,44 USD/DPU-hora con mínimo de 1 minuto por corrida; Glue Data Catalog 1 USD por 100.000
+objetos sobre 1 millón y 1 USD por millón de solicitudes sobre 1 millón; Athena 5 USD/TB escaneado.
+
+| Concepto | Supuesto | USD por millón de eventos retenidos, por mes |
+|---|---|---|
+| S3 (bronze) | 0,0898 GB medidos por millón | 0,002 |
+| SQL residual | outbox de minutos; el histórico deja de crecer en SQL | ~0 (libera ~0,14 GB por millón y por copia: datos, índices, respaldos) |
+| Glue Catalog | pocas tablas y particiones; < 1 M de objetos y solicitudes | 0 (capa gratuita) |
+| Consultas (Athena) | 100 escaneos completos al mes de ese millón (0,09 GB c/u) | 0,045 |
+
+Costos que no escalan por millón y dominan a este volumen: el job de ingesta en Glue cada 5 minutos con
+2 DPU y el mínimo de 1 minuto = 8.640 corridas × 2/60 DPU-h ≈ 288 DPU-h ≈ 127 USD/mes; el mantenimiento diario
+(1 minuto, 2 DPU) ≈ 0,44 USD/mes; PUT de commits (~5 por corrida) ≈ 0,22 USD/mes. El cómputo variable de
+cargar un millón de eventos es pequeño: el backfill local cargó 663.070 eventos nuevos en 110 s con 2 CPU.
+El SQL residual no se tarifó en USD: el precio de gp3 de la página de EBS aparece solo en un ejemplo sin
+región, y el ahorro relevante del core (buffer pool, IO, respaldos, licencias por núcleo) no es lineal por GB.
+
+**Particionamiento**: tras compactar hay 1 archivo por partición diaria, de ~477 KB (mín. 487.423 B, mediana
+488.288 B, máx. 488.884 B) para ~5.435 eventos por día; por mes serían ~14–15 MB (6 archivos en el rango). Con
+este volumen y consultas que filtran por rangos de días o meses, `months` daría archivos más sanos y 12 veces
+menos particiones; `days` se justifica cuando el volumen diario llena archivos de decenas a cientos de MB
+(del orden de 1 millón de eventos por día con ~90 bytes comprimidos por evento). La demo mantiene `days`.
+
+**Problemas reales encontrados durante las mediciones**
+- La lectura vectorizada de Iceberg (Arrow) hizo caer la JVM de Spark con SIGSEGV al leer ~1M de filas, en
+  Java 11.0.25 y también en Java 17.0.13; se desactivó (`spark.sql.iceberg.vectorization.enabled=false`).
+- El catálogo local (iceberg-rest-fixture sobre SQLite) devolvió 500 (SQLITE_BUSY) en algunos commits
+  concurrentes y a veces quedó con el lock tomado hasta reiniciarlo; WAL lo empeoró (SQLITE_BUSY_SNAPSHOT). El
+  ingestor falló sin borrar de SQL y el reintento no duplicó (conciliación: 0 event_id duplicados con 1,08 M
+  de filas). Es una limitación del catálogo local; en AWS el catálogo es Glue.
+- Con lotes del backfill de ~170.000 eventos, un IN literal de ids agotó la memoria del driver; se reemplazó
+  por un semi-join.
+- El bind mount de logs fallaba por permisos en un clon limpio (uid distintos entre api y spark); se usa el
+  volumen `applogs`.
