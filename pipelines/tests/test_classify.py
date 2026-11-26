@@ -1,4 +1,4 @@
-from auditlake.classify import BatchCounts, Outcome, classify, count_outcomes, verified_ids
+from auditlake.classify import BatchCounts, Outcome, classify, conflict_rows, count_outcomes, verified_ids
 
 
 def test_new_when_event_not_in_bronze():
@@ -23,3 +23,9 @@ def test_only_matching_hashes_are_verified_for_delete():
     batch = [(101, "e1", "h1"), (102, "e2", "h2"), (103, "e3", "h3")]
     archived = {"e1": "h1", "e2": "otro"}  # e2 en conflicto, e3 no archivado
     assert verified_ids(batch, archived) == [101]
+
+
+def test_conflict_rows_carry_incoming_and_archived_hash():
+    batch = [(101, "e1", "h1"), (102, "e2", "h2"), (103, "e3", "h3")]
+    archived = {"e1": "h1", "e2": "otro"}
+    assert conflict_rows(batch, archived) == [(102, "h2", "otro")]

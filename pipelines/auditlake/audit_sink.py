@@ -50,6 +50,9 @@ def ensure_tables(spark: SparkSession, s: Settings) -> None:
         TBLPROPERTIES ('format-version' = '2')
         """
     )
+    # Evolución de esquema (fase 3): conteo de filas movidas a cuarentena por corrida.
+    if "quarantined" not in spark.table(s.runs_table).columns:
+        spark.sql(f"ALTER TABLE {s.runs_table} ADD COLUMN quarantined bigint")
 
 
 def occurred_range(batch: DataFrame) -> Tuple[datetime, datetime]:

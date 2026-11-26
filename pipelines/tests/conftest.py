@@ -61,6 +61,14 @@ def outbox(spark, settings):
 
         def execute(self, sql):
             outbox_source.execute(spark, settings, sql)
+
+        def quarantined(self, event_id):
+            return outbox_source.query_scalar(
+                spark, settings, f"SELECT COUNT_BIG(*) FROM audit.OutboxQuarantine WHERE EventId = '{event_id}'")
+
+        def quarantine_row(self, event_id):
+            rows = outbox_source.quarantine_report(spark, settings, limit=1000)
+            return next(r for r in rows if r["event_id"] == event_id)
     return _Outbox()
 
 
@@ -71,6 +79,43 @@ def uuid7_at(ts):
     rand = int.from_bytes(os.urandom(10), "big")
     value = (ms << 80) | (0x7 << 76) | (((rand >> 62) & 0xFFF) << 64) | (0b10 << 62) | (rand & ((1 << 62) - 1))
     return str(_uuid.UUID(int=value))
+
+
+def insert_event(conn, ts, event_id=None, payload=None):
+    """INSERT de un evento en audit.Outbox con la conexión dada (respeta su transacción). Devuelve (Id, event_id)."""
+    import hashlib
+
+    event_id = event_id or uuid7_at(ts)
+    payload = payload or json.dumps({"transferId": event_id, "amount": 10, "approvedBy": "seed"},
+                                    separators=(",", ":"))
+    ps = conn.prepareStatement(
+        "SET NOCOUNT ON; "
+        "INSERT INTO audit.Outbox (EventId, EventType, SchemaVersion, OccurredAt, Payload, PayloadHash) "
+        "VALUES (?, 'TransferApproved', 1, CAST(? AS datetimeoffset), ?, ?); SELECT CAST(SCOPE_IDENTITY() AS bigint);")
+    ps.setString(1, event_id)
+    ps.setString(2, ts.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00")
+    ps.setString(3, payload)
+    ps.setString(4, hashlib.sha256(payload.encode()).hexdigest())
+    rs = ps.executeQuery()
+    rs.next()
+    return rs.getLong(1), event_id
+
+
+@pytest.fixture
+def sql_connection(spark, settings):
+    """Abre conexiones JDBC "de aplicación" (sin los ajustes del worker) y las cierra al final."""
+    opened = []
+
+    def _open():
+        conn = outbox_source._connection(spark, settings)
+        opened.append(conn)
+        return conn
+    yield _open
+    for conn in opened:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 @pytest.fixture

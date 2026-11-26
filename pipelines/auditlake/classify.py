@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, Mapping, Optional, Tuple
+from typing import Iterable, List, Mapping, Optional, Tuple
 
 
 class Outcome(str, Enum):
     NEW = "new"
     DUPLICATE = "duplicate"  # mismo event_id y mismo hash: ya archivado (p. ej. reintento tras caída)
-    CONFLICT = "conflict"  # mismo event_id, distinto hash: nunca se sobrescribe ni se borra
+    CONFLICT = "conflict"  # mismo event_id, distinto hash: bronze no se toca; la fila entrante va a cuarentena
 
 
 def classify(incoming_hash: str, existing_hash: Optional[str]) -> Outcome:
@@ -44,4 +44,15 @@ def verified_ids(
         outbox_id
         for outbox_id, event_id, payload_hash in batch
         if archived.get(event_id) == payload_hash
+    ]
+
+
+def conflict_rows(
+    batch: Iterable[Tuple[int, str, str]], archived: Mapping[str, str]
+) -> List[Tuple[int, str, str]]:
+    """(outbox_id, hash entrante, hash archivado) de las filas en conflicto: van a cuarentena."""
+    return [
+        (outbox_id, payload_hash, archived[event_id])
+        for outbox_id, event_id, payload_hash in batch
+        if event_id in archived and archived[event_id] != payload_hash
     ]
