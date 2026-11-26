@@ -44,7 +44,20 @@ public sealed class AuditLakeDbContext(DbContextOptions<AuditLakeDbContext> opti
             e.Property(q => q.QuarantinedAt).HasDefaultValueSql("SYSDATETIMEOFFSET()");
             e.HasIndex(q => q.EventId);
         });
+
+        modelBuilder.Entity<LegacyAuditLogEntry>(e =>
+        {
+            e.ToTable("AuditLog", "legacy");
+            e.HasKey(l => l.Id).IsClustered();
+            e.Property(l => l.Id).UseIdentityColumn();
+            e.Property(l => l.EventType).HasMaxLength(200);
+            e.Property(l => l.Amount).HasPrecision(18, 2);
+            e.Property(l => l.ApprovedBy).HasMaxLength(100);
+            e.HasIndex(l => l.OccurredAt); // backfill, conciliación y purga por rango de fechas
+        });
     }
+
+    public DbSet<LegacyAuditLogEntry> LegacyAuditLog => Set<LegacyAuditLogEntry>();
 
     public DbSet<OutboxQuarantineEntry> OutboxQuarantine => Set<OutboxQuarantineEntry>();
 }

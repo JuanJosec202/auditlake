@@ -48,6 +48,43 @@ namespace AuditLake.Api.Infrastructure.Migrations
                     b.ToTable("Transfers", "dbo");
                 });
 
+            modelBuilder.Entity("AuditLake.Api.Infrastructure.LegacyAuditLogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<long>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("decimal(18,2)");
+
+                    b.Property<string>("ApprovedBy")
+                        .IsRequired()
+                        .HasMaxLength(100)
+                        .HasColumnType("nvarchar(100)");
+
+                    b.Property<string>("EventType")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTimeOffset>("OccurredAt")
+                        .HasColumnType("datetimeoffset");
+
+                    b.Property<Guid>("TransferId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.HasKey("Id");
+
+                    SqlServerKeyBuilderExtensions.IsClustered(b.HasKey("Id"));
+
+                    b.HasIndex("OccurredAt");
+
+                    b.ToTable("AuditLog", "legacy");
+                });
+
             modelBuilder.Entity("AuditLake.Api.Infrastructure.OutboxMessage", b =>
                 {
                     b.Property<long>("Id")
