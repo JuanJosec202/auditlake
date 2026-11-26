@@ -65,23 +65,43 @@ decisión pendiente con negocio, no se implementa.
 ## 5. Modos de falla
 | Falla | Comportamiento | Recuperación | Pérdida |
 |---|---|---|---|
-| Worker cae antes/durante la lectura | Nada escrito | Relee el mismo lote | No |
-| Cae a mitad del MERGE | Commit Iceberg atómico, no se aplica | Reprocesa el lote | No |
+| Worker cae antes/durante la lectura | Nada escrito (no probado: antes de leer no hay escrituras en Iceberg ni en SQL) | Relee el mismo lote | No |
+| Cae a mitad del MERGE | Commit Iceberg atómico, no se aplica (no probado: el MERGE publica un snapshot nuevo en un solo commit del catálogo; si no llega a confirmarse, los lectores siguen viendo el anterior) | Reprocesa el lote | No |
 | Cae tras commit Iceberg, antes del DELETE | Archivado pero pendiente en SQL | Detecta duplicados idénticos y borra | No, sin duplicados |
 | Cae a mitad del DELETE | Lotes parcialmente borrados | Verifica y borra el resto | No |
 | Pico con worker caído | La outbox crece | Drena por lotes al volver | No, si SQL tiene espacio |
 | SQL sin espacio | Falla el INSERT de la outbox | Falla la operación de negocio (intencional); alerta previa | No |
 | MinIO/S3 o catálogo caídos | No puede escribir | Reintentos con backoff | No |
-| Dos workers a la vez | Conflicto de commit Iceberg | Reintento + MERGE idempotente | No |
+| Dos workers a la vez | El segundo no obtiene `sp_getapplock` y sale antes de leer | Ninguna; el primero termina el lote | No |
 | Compactación vs ingesta | Conflicto de commit | Reintento; ventanas separadas | No |
 | Payload malformado | Bronze lo guarda como texto | Test dbt en silver alerta | No |
-| Mismo event_id, distinto hash | No bloquea el pipeline | Mueve la fila a audit.OutboxQuarantine + alerta | No |
+| Mismo event_id, distinto hash | No bloquea el pipeline | `DELETE ... OUTPUT ... INTO audit.OutboxQuarantine` (fila entrante completa + hash archivado + motivo + run_id) en la misma transacción del DELETE verificado; bronze no se toca | No |
 | Falla dbt o mantenimiento | La ingesta sigue | Corregir y reejecutar | No |
 | Se pierden archivos de hiper-logs | Ruta best effort | Aceptado y documentado | Posible (decisión explícita) |
 
-**Bloqueos en SQL:** RCSI (los lectores no bloquean), DELETE en lotes de 4000 por PK (bajo la escalada
-de 5000), DEADLOCK_PRIORITY LOW en el worker, LOCK_TIMEOUT 5000, transacciones abiertas de la API se
-toman en la siguiente pasada (caso 101/102), purga del histórico fuera de pico con WAITFOR DELAY.
+**Bloqueos en SQL:** línea base sin RCSI (EF Core crea la base con RCSI ON; la migración RcsiOffBaseline
+lo deja en OFF hasta la medición de la fase 6). El worker lee con `WITH (READPAST)`: salta las filas de
+transacciones abiertas de la API y las toma en la siguiente pasada (caso 101/102). DELETE en lotes de 4000
+por PK (bajo la escalada de 5000). `SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW` solo en las sesiones
+del worker (sessionInitStatement de Spark y sus conexiones JDBC); la API no cambia. Purga del histórico
+fuera de pico con WAITFOR DELAY.
+
+**Un solo ingestor activo:** al arrancar, antes de leer, el job toma `sp_getapplock` exclusivo con dueño
+Session y espera 0 en una conexión que mantiene abierta toda la corrida; si no lo obtiene, sale sin leer ni
+escribir. Si el proceso muere, SQL Server libera el lock al cerrar la sesión. Un ingestor colgado conserva
+el lock mientras su sesión SQL siga abierta: en local la recuperación es detener el contenedor del job
+(`docker stop <contenedor>`); en AWS, el timeout del Glue Job (con MaxConcurrentRuns=1). El atraso se
+detecta con la edad del pendiente más antiguo en audit.Outbox.
+
+**Evidencia de la fase 3 (para la medición de la fase 6):**
+- Contención: con una transacción de la API abierta, la lectura sin READPAST quedó bloqueada 5,1 s hasta
+  el LOCK_TIMEOUT (error 1222); con READPAST no esperó y tomó la fila en la pasada siguiente.
+- RCSI: EF Core lo había activado al crear la base; la línea base quedó en OFF de forma explícita.
+- MinIO caído: la corrida falló tras 346 s (timeout de lectura del catálogo REST, que no puede leer los
+  metadatos en S3), las 5 filas siguieron pendientes y el reintento las archivó (inserted=5, 0 duplicados en
+  la conciliación por event_id). Archivos huérfanos: no se observaron (39 .parquet en MinIO = 39
+  referenciados por snapshots); la fase 5 igual programa remove_orphan_files. Pendiente evaluar un timeout
+  de catálogo más corto para fallar antes.
 
 **Monitoreo:** edad del pendiente más antiguo (métrica principal), filas en la outbox y espacio libre,
 corridas fallidas en ingestion_runs, filas en cuarentena > 0, archivos por partición.

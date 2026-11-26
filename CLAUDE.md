@@ -9,7 +9,7 @@ los modos de falla, las pruebas de aceptación y la estructura del README.
 ## Alcance congelado. No agregar componentes fuera de esta lista.
 - Docker Compose: sqlserver, api, minio (+ minio-init), iceberg-rest, spark
 - .NET 10 (EF Core 10): un proyecto API (carpetas Domain/Application/Infrastructure) + un proyecto de tests
-- SQL Server: audit.Outbox (sin columna de estado), audit.OutboxQuarantine, legacy.AuditLog; RCSI ON
+- SQL Server: audit.Outbox (sin columna de estado), audit.OutboxQuarantine, legacy.AuditLog; RCSI OFF como línea base (se decide en la fase 6)
 - Python: outbox_source, audit_sink, log_ingest, main (--backfill), maintenance.py; conf/local y conf/aws
 - Iceberg: bronze.audit_events, bronze.technical_logs, bronze.ingestion_runs
 - dbt (dbt-spark, method: session): silver.audit_events, gold.audit_daily (vistas) + tests
@@ -30,11 +30,14 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 ## Reglas técnicas
 - .NET: un solo SaveChangesAsync para negocio + outbox. EventId = UUIDv7 (Guid.CreateVersion7()). PayloadHash = SHA-256 del payload canónico.
 - Outbox: PK bigint IDENTITY clusterizada; la presencia de la fila significa "pendiente".
-- Worker en SQL: SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW; DELETE en lotes de 4000 por PK.
-- Lectura de la outbox: SELECT TOP (n) ... ORDER BY Id sobre filas existentes. Nunca watermark por ID máximo.
+- Worker en SQL: SET LOCK_TIMEOUT 5000; SET DEADLOCK_PRIORITY LOW solo en sus sesiones; DELETE en lotes de 4000 por PK.
+- Un solo ingestor: sp_getapplock exclusivo (Session, timeout 0) antes de leer; el segundo arranque sale sin procesar.
+- Lectura de la outbox: SELECT TOP (n) ... WITH (READPAST) ORDER BY Id sobre filas existentes. Nunca watermark por ID máximo.
 - Lote materializado antes de escribir (cache + count) para evitar re-evaluación JDBC.
-- MERGE Iceberg solo WHEN NOT MATCHED THEN INSERT, con poda por rango de occurred_at del lote.
-- Conflicto (mismo event_id, distinto hash): mover la fila a audit.OutboxQuarantine en la misma transacción del DELETE.
+- Búsqueda de existencia por rango de event_id + semi-join, sin filtrar por occurred_at (métricas full de event_id).
+- MERGE Iceberg solo WHEN NOT MATCHED THEN INSERT de los eventos confirmados como nuevos, con poda por su rango de occurred_at.
+- Conflicto (mismo event_id, distinto hash): mover la fila a audit.OutboxQuarantine en la misma transacción del DELETE
+  (DELETE ... OUTPUT con columnas explícitas ... INTO); se cuenta en ingestion_runs.quarantined.
 - Bronze guarda el payload como texto; el parseo y la normalización v1/v2 ocurren en silver (dbt).
 - Particionamiento: days(occurred_at) oculto; orden de escritura event_type, occurred_at.
 - Mantenimiento con procedimientos de Iceberg (rewrite_data_files, rewrite_manifests, expire_snapshots,
@@ -62,7 +65,9 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
 ## Fases
 1. Compose (sqlserver, api) + API .NET 10 con outbox (DbContext directo) + 2 tests de atomicidad.
 2. minio, minio-init, iceberg-rest + servicio spark + job de ingesta (outbox_source, audit_sink, main) + ingestion_runs + prueba de caída.
-3. RCSI solo si la medición de contención lo justifica + ajustes de concurrencia del worker + test 101/102 + make chaos (caída por punto, docker stop minio, dos workers).
+3. Cuarentena + READPAST y ajustes de sesión del worker + test 101/102 + ingestor único (sp_getapplock) + caídas (tras commit Iceberg, MinIO caído) + main --reconcile. Sin RCSI.
 4. Serilog + log_ingest + proyecto dbt (silver, gold, tests, conciliación) + evento v2.
 5. legacy.AuditLog + --backfill + maintenance.py (compactación, retención, snapshots).
-6. Benchmark p95 y tamaños + make demo + README.
+6. Benchmark p95 y tamaños + comparación con y sin RCSI (contención medida, usando la evidencia de la fase 3 en docs/design.md):
+   validar la lectura del worker con RCSI activo; si se quiere conservar el comportamiento de READPAST,
+   probar la variante WITH (READCOMMITTEDLOCK, READPAST) + make demo + README.
