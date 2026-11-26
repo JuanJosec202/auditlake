@@ -486,3 +486,9 @@ $RECYCLE.BIN/
 
 # Datos locales (hiper-logs de la demo)
 data/
+
+# Artefactos locales de Spark/dbt
+metastore_db/
+derby.log
+spark-warehouse/
+dbt/.user.yml
