@@ -92,7 +92,10 @@ def archived_hashes(spark: SparkSession, s: Settings, event_ids: Sequence[str]) 
 def merge_new(spark: SparkSession, s: Settings, batch: DataFrame, new_event_ids: Sequence[str], run_id: str) -> None:
     """Inserta solo los eventos ya confirmados como nuevos. La poda por occurred_at se usa aquí,
     con el rango de esos eventos; WHEN NOT MATCHED es la red de seguridad de idempotencia."""
-    new_rows = batch.where(F.col("event_id").isin(list(new_event_ids)))
+    # Semi-join con un DataFrame de ids (no un IN literal): con lotes grandes del backfill (~170.000 eventos
+    # por mes) un IN de cientos de miles de literales agota la memoria del driver.
+    wanted = batch.sparkSession.createDataFrame([(e,) for e in new_event_ids], "event_id string")
+    new_rows = batch.join(wanted, "event_id", "left_semi")
     lo, hi = occurred_range(new_rows)
     (
         new_rows.select("event_id", "event_type", "schema_version", "occurred_at", "payload", "payload_hash")

@@ -68,7 +68,9 @@ services:
     image: apache/iceberg-rest-fixture:1.8.1
     environment:
       # El catálogo vive en SQLite dentro de un volumen: sobrevive a reinicios (por defecto es en memoria).
-      CATALOG_URI: jdbc:sqlite:/home/iceberg/catalog.db
+      # busy_timeout: con lecturas y commits concurrentes SQLite devolvía SQLITE_BUSY (500 en el commit).
+      # WAL lo empeoró (SQLITE_BUSY_SNAPSHOT con el pool de conexiones del catálogo), por eso no se usa.
+      CATALOG_URI: jdbc:sqlite:/home/iceberg/catalog.db?journal_mode=DELETE&busy_timeout=10000
       CATALOG_WAREHOUSE: s3://warehouse/
       CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
       CATALOG_S3_ENDPOINT: http://minio:9000
