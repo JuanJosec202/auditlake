@@ -1,0 +1,9 @@
+auditlake:
+  target: local
+  outputs:
+    local:
+      type: spark
+      method: session      # usa la SparkSession del proceso (spark-defaults.conf: catálogo lake)
+      host: NA
+      schema: silver
+      threads: 1

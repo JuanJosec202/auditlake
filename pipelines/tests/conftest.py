@@ -81,7 +81,7 @@ def uuid7_at(ts):
     return str(_uuid.UUID(int=value))
 
 
-def insert_event(conn, ts, event_id=None, payload=None):
+def insert_event(conn, ts, event_id=None, payload=None, schema_version=1):
     """INSERT de un evento en audit.Outbox con la conexión dada (respeta su transacción). Devuelve (Id, event_id)."""
     import hashlib
 
@@ -91,7 +91,8 @@ def insert_event(conn, ts, event_id=None, payload=None):
     ps = conn.prepareStatement(
         "SET NOCOUNT ON; "
         "INSERT INTO audit.Outbox (EventId, EventType, SchemaVersion, OccurredAt, Payload, PayloadHash) "
-        "VALUES (?, 'TransferApproved', 1, CAST(? AS datetimeoffset), ?, ?); SELECT CAST(SCOPE_IDENTITY() AS bigint);")
+        f"VALUES (?, 'TransferApproved', {int(schema_version)}, CAST(? AS datetimeoffset), ?, ?); "
+        "SELECT CAST(SCOPE_IDENTITY() AS bigint);")
     ps.setString(1, event_id)
     ps.setString(2, ts.strftime("%Y-%m-%d %H:%M:%S.%f") + " +00:00")
     ps.setString(3, payload)

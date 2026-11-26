@@ -1,0 +1,8 @@
+version: 2
+sources:
+  - name: bronze
+    schema: bronze
+    tables:
+      - name: audit_events
+      - name: ingestion_runs
+      - name: technical_logs

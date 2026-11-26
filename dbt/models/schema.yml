@@ -1,0 +1,23 @@
+version: 2
+models:
+  - name: audit_events
+    description: Eventos de auditoría normalizados (v1 y v2).
+    columns:
+      - name: event_id
+        data_tests:
+          - unique: {config: {severity: error}}
+          - not_null: {config: {severity: error}}
+      - name: event_type
+        data_tests:
+          - accepted_values: {values: ["TransferApproved"]}
+      - name: schema_version
+        data_tests:
+          - accepted_values: {values: [1, 2], quote: false}
+      - name: transfer_id
+        data_tests:
+          - not_null: {config: {severity: warn, store_failures: true}}
+      - name: amount
+        data_tests:
+          - not_null: {config: {severity: warn, store_failures: true}}
+  - name: audit_daily
+    description: Conteo diario por día, tipo de evento y moneda.
