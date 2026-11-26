@@ -4,7 +4,7 @@ name: auditlake
 # con datos separados. Los puertos de desarrollo están en docker-compose.dev.yml:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 # Demo (proyecto aislado, sin pasos previos):
-#   docker compose -p auditlake-demo -f docker-compose.yml run --build --rm spark python -m auditlake.demo
+#   docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example run --build --rm spark python -m auditlake.demo
 # Sin .env se usan credenciales de demo solo para este entorno local; un .env (copia de .env.example) las reemplaza.
 
 services:

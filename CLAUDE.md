@@ -14,7 +14,7 @@ los modos de falla, las pruebas de aceptación y la estructura del README.
 - Iceberg: bronze.audit_events, bronze.technical_logs, bronze.ingestion_runs
 - dbt (dbt-spark, method: session): silver.audit_events, gold.audit_daily (vistas) + tests
 - Sin Makefile: el punto de entrada es Docker Compose (base sin puertos; docker-compose.dev.yml para desarrollo;
-  demo: docker compose -p auditlake-demo -f docker-compose.yml run --build --rm spark python -m auditlake.demo)
+  demo: docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example run --build --rm spark python -m auditlake.demo)
 
 ## Fuera de alcance: no proponer
 Kafka, Debezium/CDC, Airflow, MediatR/CQRS, repositorio genérico sobre EF, varios proyectos .NET por capa,

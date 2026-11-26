@@ -12,14 +12,18 @@ pruebas .NET, el SDK de .NET 10.
 
 ```bash
 git clone https://github.com/JuanJosec202/auditlake.git && cd auditlake
-docker compose -p auditlake-demo -f docker-compose.yml run --build --rm spark python -m auditlake.demo
+docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example run --build --rm spark python -m auditlake.demo
 ```
 
-No hace falta ningún paso previo: sin `.env`, el Compose usa credenciales de demo válidas solo para este entorno
-local (para cambiarlas, copia `.env.example` a `.env`). `-p auditlake-demo` crea un proyecto aislado
-(contenedores, red y volúmenes `auditlake-demo_*`) y `-f docker-compose.yml` usa solo el Compose base, que no
-publica puertos, así que la demo puede correr junto al stack de desarrollo sin mezclar datos. Para borrar la demo:
-`docker compose -p auditlake-demo -f docker-compose.yml down -v`.
+No hace falta ningún paso previo. `-p auditlake-demo` crea un proyecto aislado (contenedores, red y volúmenes
+`auditlake-demo_*`); `-f docker-compose.yml` usa solo el Compose base, que no publica puertos, así que la demo
+puede correr junto a otros proyectos o al stack de desarrollo sin choques; y `--env-file .env.example` fija las
+credenciales de demo (solo para este entorno local), así que todas las corridas usan las mismas aunque exista un
+`.env`. Para empezar de cero o borrar la demo:
+
+```bash
+docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example down -v
+```
 
 La demo siembra 36.800 eventos históricos en `legacy.AuditLog`, aprueba 200 transferencias por la API, ejecuta
 el ingestor, el backfill dos veces (idempotencia), la conciliación y purga del histórico, `log_ingest`,
@@ -42,8 +46,8 @@ Para no repetir `-f`, `.env.example` incluye comentadas `COMPOSE_FILE` y `COMPOS
 desarrollo, porque las pruebas aplican retención y expiran snapshots):
 
 ```bash
-docker compose -p auditlake-demo -f docker-compose.yml run --rm spark sh -c "ruff check . && pytest -q"
-docker compose -p auditlake-demo -f docker-compose.yml run --rm spark sh -c "cd /dbt && dbt build --profiles-dir /dbt"
+docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example run --rm spark sh -c "ruff check . && pytest -q"
+docker compose -p auditlake-demo -f docker-compose.yml --env-file .env.example run --rm spark sh -c "cd /dbt && dbt build --profiles-dir /dbt"
 dotnet test
 ```
 
