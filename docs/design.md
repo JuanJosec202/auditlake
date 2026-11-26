@@ -58,6 +58,23 @@ decisión pendiente con negocio, no se implementa.
   una identidad reproducible derivada de la PK de legacy.AuditLog (reejecutar da el mismo event_id). Para
   que la búsqueda por rango siga podando, el event_id determinista debe empezar por el timestamp original
   (forma UUIDv7/v8 con prefijo de tiempo), no ser un hash aleatorio.
+- **Hiper-logs (fase 4):** Serilog escribe CLEF (RenderedCompactJsonFormatter) en `data/logs/active`, con
+  rotación por minuto como configuración de demo (en producción, por hora o por tamaño). `log_ingest` primero
+  sella: mueve a `ready/` solo archivos cuyo periodo terminó hace al menos 1 minuto y nunca el activo (el más
+  reciente), porque Spark recuerda cada archivo por ruta y no relee lo que se agregue después. Luego
+  `readStream` con `trigger(availableNow=True)` y checkpoint persistente (volumen `spark-checkpoints`; en AWS,
+  S3) escribe en bronze.technical_logs; una segunda corrida sin archivos nuevos da numInputRows=0.
+  `cleanSource=archive` mueve a `archive/` (fuera de `ready/`) los archivos de un batch cuando el siguiente
+  batch se confirma; con availableNow eso ocurre en la corrida siguiente que procese datos (medido: los
+  archivos de la corrida 1 se archivaron en la corrida 3). Un archivo ya registrado en el checkpoint no se
+  vuelve a leer aunque siga en `ready/`.
+- **Silver y gold (dbt, vistas):** silver.audit_events normaliza TransferApproved v1
+  (`transferId, amount, approvedBy`, moneda desconocida) y v2 (`transfer.id, transfer.amount.{value,currency},
+  approver.userId`). gold.audit_daily agrupa por día, tipo de evento y moneda; el grupo v1 queda con
+  currency NULL, se cuenta y su monto total queda en NULL para no sumar monedas distintas. Tests: unique y
+  not_null de event_id y la conciliación de corridas como `error`; not_null de transfer_id y amount como
+  `warn` con store_failures (tabla Iceberg en dbt_test__audit). Conciliación: en corridas `succeeded` con
+  quarantined no nulo, read_count = inserted + duplicates + conflicts y conflicts = quarantined.
 - **Evolución de esquema:** identidad estable, campos opcionales, schema_version; silver lee v1 y v2.
 - **Calidad (dbt):** unique/not_null en event_id, accepted_values en event_type, test de conciliación
   read_count = inserted + duplicates + conflicts.
@@ -154,3 +171,33 @@ AWS; silver/gold se reconstruyen desde bronze con dbt build --full-refresh.
    4. Casos reales de docs/ai-log.md.
 9. Uso de IA (desde docs/ai-log.md: prompts clave, aceleraciones, correcciones humanas con evidencia)
 10. Despliegue en AWS (conf/aws, Glue Job con MaxConcurrentRuns=1, Glue Catalog, S3)
+
+## 8. Versiones y runtime
+
+Versiones que funcionan en Docker (verificadas en la PoC):
+
+| Componente | Versión |
+|---|---|
+| .NET SDK / EF Core | 10.0.404 / 10.0.15; Serilog.AspNetCore 11.0.0 |
+| SQL Server | mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04 |
+| Spark (imagen apache/spark) | 3.5.4, Scala 2.12, Java 11, Python 3.8.10 |
+| Iceberg cliente / REST | iceberg-spark-runtime-3.5_2.12 1.7.1 + iceberg-aws-bundle 1.7.1 / apache/iceberg-rest-fixture 1.8.1 (la primera publicada) |
+| JDBC | mssql-jdbc 12.8.1.jre11 |
+| dbt | dbt-core 1.8.7, dbt-spark 1.8.0 (sin el extra `[session]`, que instala otra pyspark), dbt-adapters 1.7.0, dbt-common 1.11.0, isodate 0.6.1 (pin por conflicto con dbt-common) |
+| MinIO / aws-cli | compilado desde RELEASE.2025-10-15T17-29-55Z / amazon/aws-cli 2.22.35 |
+
+dbt 1.8 es la última línea que soporta Python 3.8, que es el Python de la imagen de Spark 3.5.4.
+Validado antes de escribir los modelos: `method: session` usa la SparkSession del proceso (catálogo `lake`), las
+vistas quedan registradas en el catálogo REST como vistas Iceberg y store_failures crea tablas Iceberg en S3.
+
+**Runtime objetivo en AWS:** el job PySpark (main, log_ingest, maintenance) apunta a AWS Glue 5.0 (Spark 3.5.4,
+Iceberg 1.7.1, Python 3.11). El código se mantiene compatible con Python 3.8 (ruff target py38) para correr igual
+en local y en Glue 5. En AWS solo cambia conf/aws: GlueCatalog en lugar de REST, S3 en lugar de MinIO y el
+checkpoint de log_ingest en S3. Job con MaxConcurrentRuns=1 y timeout (ver ingestor único).
+
+**dbt en AWS (no implementado):** usar el adaptador dbt-glue (perfil `type: glue`, sesiones interactivas de
+Glue con Iceberg y Glue Data Catalog), para que los modelos sigan en Spark SQL sin cambios (get_json_object,
+vistas). dbt se ejecutaría desde un contenedor (tarea de ECS o CodeBuild) disparado por EventBridge después del
+job de ingesta, con `dbt build` y el mismo proyecto. Las vistas Spark registradas en Glue no se consultan desde
+Athena: si negocio necesita gold desde Athena, se materializa como tabla o se usa dbt-athena con el SQL
+adaptado a Trino.
