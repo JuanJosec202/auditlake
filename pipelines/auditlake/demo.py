@@ -94,6 +94,9 @@ def ingest_logs(spark: SparkSession, s: Settings, wait_s: int = 150) -> Dict[str
         while not moved and time.time() < deadline:
             moved = log_ingest.seal(paths)
             if not moved:
+                # Una petición liviana hace que Serilog abra el archivo del minuto actual; así el archivo
+                # anterior deja de ser el activo y puede sellarse cuando pase el margen.
+                urllib.request.urlopen(API + "/health", timeout=5).read()
                 time.sleep(10)
         rows = log_ingest.ingest(spark, paths, "demo")
         return {"sealed": len(moved), "numInputRows": rows, "technical_logs": spark.table(paths.table).count()}
