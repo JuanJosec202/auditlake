@@ -53,6 +53,9 @@ def ensure_tables(spark: SparkSession, s: Settings) -> None:
     # Evolución de esquema (fase 3): conteo de filas movidas a cuarentena por corrida.
     if "quarantined" not in spark.table(s.runs_table).columns:
         spark.sql(f"ALTER TABLE {s.runs_table} ADD COLUMN quarantined bigint")
+    # Fase 5: modo de la corrida (outbox | backfill).
+    if "mode" not in spark.table(s.runs_table).columns:
+        spark.sql(f"ALTER TABLE {s.runs_table} ADD COLUMN mode string")
 
 
 def occurred_range(batch: DataFrame) -> Tuple[datetime, datetime]:
@@ -109,3 +112,26 @@ def merge_new(spark: SparkSession, s: Settings, batch: DataFrame, new_event_ids:
 
 def record_run(spark: SparkSession, s: Settings, run: dict) -> None:
     spark.createDataFrame([run], schema=spark.table(s.runs_table).schema).writeTo(s.runs_table).append()
+
+
+def legacy_to_events(legacy: DataFrame) -> DataFrame:
+    """Convierte filas de legacy.AuditLog en eventos TransferApproved v1 con identidad reproducible.
+    El payload canónico se arma con un orden fijo de campos, así el hash es estable entre corridas."""
+    from pyspark.sql.types import StringType
+
+    from auditlake.classify import legacy_event_id
+
+    event_id = F.udf(lambda pk, ts: legacy_event_id(pk, ts), StringType())
+    payload = F.to_json(F.struct(
+        F.col("transfer_id").alias("transferId"),
+        F.col("amount").alias("amount"),
+        F.col("approved_by").alias("approvedBy"),
+        F.date_format("occurred_at", "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXX").alias("approvedAt"),
+    ))
+    return (
+        legacy.withColumn("event_id", event_id("legacy_id", "occurred_at"))
+        .withColumn("schema_version", F.lit(1))
+        .withColumn("payload", payload)
+        .withColumn("payload_hash", F.sha2(F.col("payload"), 256))
+        .select("legacy_id", "event_id", "event_type", "schema_version", "occurred_at", "payload", "payload_hash")
+    )

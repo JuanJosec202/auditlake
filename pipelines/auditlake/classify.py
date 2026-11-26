@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import hashlib
+import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Iterable, List, Mapping, Optional, Tuple
 
@@ -56,3 +59,24 @@ def conflict_rows(
         for outbox_id, event_id, payload_hash in batch
         if event_id in archived and archived[event_id] != payload_hash
     ]
+
+
+# --- Identidad reproducible del backfill -------------------------------------------------------------
+
+LEGACY_SOURCE = "sqlserver:AuditLake"
+LEGACY_TABLE = "legacy.AuditLog"
+
+
+def legacy_event_id(pk: int, occurred_at: datetime, source: str = LEGACY_SOURCE, table: str = LEGACY_TABLE) -> str:
+    """UUIDv7 determinista para una fila histórica: 48 bits con los ms de occurred_at (orden temporal, así la
+    búsqueda por rango de event_id sigue podando archivos) y los 74 bits restantes de SHA-256 de la identidad
+    estable de origen (sistema/tabla/PK). Reejecutar el backfill produce el mismo event_id. occurred_at sin
+    zona horaria se interpreta como UTC."""
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=timezone.utc)
+    ms = int(occurred_at.timestamp() * 1000)
+    digest = int.from_bytes(hashlib.sha256(f"{source}/{table}/{int(pk)}".encode()).digest()[:10], "big")
+    rand_a = (digest >> 68) & 0xFFF  # 12 bits
+    rand_b = digest & ((1 << 62) - 1)  # 62 bits
+    value = (ms << 80) | (0x7 << 76) | (rand_a << 64) | (0b10 << 62) | rand_b
+    return str(uuid.UUID(int=value))
