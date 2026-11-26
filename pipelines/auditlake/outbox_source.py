@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 from typing import List, Sequence, Tuple
 
 from pyspark.sql import DataFrame, SparkSession
@@ -56,17 +57,20 @@ def _connection(spark: SparkSession, s: Settings, worker: bool = False):
     return conn
 
 
-LOCK_RESOURCE = "auditlake-ingestor"
+# Un lock por tabla Iceberg (único escritor). audit_events: ingestor, backfill y su mantenimiento.
+# technical_logs: log_ingest y su retención.
+LOCK_AUDIT_EVENTS = "auditlake:audit_events"
+LOCK_TECHNICAL_LOGS = "auditlake:technical_logs"
 
 
-def try_acquire_ingestor_lock(spark: SparkSession, s: Settings):
+def try_acquire_lock(spark: SparkSession, s: Settings, resource: str):
     """sp_getapplock exclusivo con dueño Session y espera 0. Devuelve la conexión que lo sostiene
     (cerrarla lo libera; si el proceso muere, SQL Server lo libera al cerrar la sesión) o None si
-    otro ingestor ya está activo."""
+    otro proceso ya escribe esa tabla."""
     conn = _connection(spark, s, worker=True)
     rs = conn.createStatement().executeQuery(
         "SET NOCOUNT ON; DECLARE @r int; "
-        f"EXEC @r = sp_getapplock @Resource = N'{LOCK_RESOURCE}', @LockMode = 'Exclusive', "
+        f"EXEC @r = sp_getapplock @Resource = N'{resource}', @LockMode = 'Exclusive', "
         "@LockOwner = 'Session', @LockTimeout = 0; SELECT @r;"
     )
     rs.next()
@@ -190,5 +194,58 @@ def quarantine_report(spark: SparkSession, s: Settings, limit: int = 20) -> List
         while rs.next():
             out.append({c: rs.getString(i + 1) for i, c in enumerate(cols)})
         return out
+    finally:
+        conn.close()
+
+
+# --- legacy.AuditLog (histórico, una vez) ------------------------------------------------------------
+
+_LEGACY_QUERY = """
+SELECT
+    Id                                                        AS legacy_id,
+    CONVERT(datetime2(6), SWITCHOFFSET(OccurredAt, '+00:00')) AS occurred_at,
+    EventType                                                 AS event_type,
+    LOWER(CONVERT(char(36), TransferId))                      AS transfer_id,
+    Amount                                                    AS amount,
+    ApprovedBy                                                AS approved_by
+FROM legacy.AuditLog
+WHERE OccurredAt >= '{start}' AND OccurredAt < '{end}'
+"""
+
+
+def read_legacy(spark: SparkSession, s: Settings, start: str, end: str) -> DataFrame:
+    """Filas históricas en [start, end) (fechas UTC 'YYYY-MM-DD'), materializadas (cache + count)."""
+    for d in (start, end):  # se interpolan en el SQL: validar el formato
+        datetime.strptime(d, "%Y-%m-%d")
+    df = (
+        spark.read.format("jdbc")
+        .option("url", s.jdbc_url)
+        .option("user", s.user)
+        .option("password", s.password)
+        .option("query", _LEGACY_QUERY.format(start=start + " 00:00:00 +00:00", end=end + " 00:00:00 +00:00"))
+        .option("sessionInitStatement", WORKER_SESSION_SETTINGS)
+        .load()
+        .cache()
+    )
+    df.count()
+    return df
+
+
+def purge_legacy_ids(spark: SparkSession, s: Settings, ids: Sequence[int], chunk: int = 1000,
+                     pause: str = "00:00:00.100") -> int:
+    """Borra de legacy.AuditLog solo los Id verificados, en lotes pequeños (cada uno su transacción) con una
+    pausa entre lotes para no competir con la carga del core."""
+    if not ids:
+        return 0
+    conn = _connection(spark, s, worker=True)
+    try:
+        conn.setAutoCommit(True)
+        stmt = conn.createStatement()
+        deleted = 0
+        for i in range(0, len(ids), chunk):
+            batch = ",".join(str(int(x)) for x in ids[i : i + chunk])
+            deleted += stmt.executeUpdate(f"DELETE FROM legacy.AuditLog WHERE Id IN ({batch})")
+            stmt.execute(f"WAITFOR DELAY '{pause}'")
+        return deleted
     finally:
         conn.close()

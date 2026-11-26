@@ -23,6 +23,9 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.types import DoubleType, IntegerType, StringType, StructField, StructType
 
+from auditlake import outbox_source
+from auditlake.config import Settings
+
 log = logging.getLogger("auditlake.log_ingest")
 
 # api-202611260038.clef o api-202611260038_001.clef (rotación por tamaño dentro del mismo minuto)
@@ -155,11 +158,18 @@ def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     run_id = str(uuid.uuid4())
     paths = Paths()
-    moved = seal(paths)
-    log.info("run_id=%s sellados=%d %s", run_id, len(moved), moved)
     spark = SparkSession.builder.appName("auditlake-log-ingest").getOrCreate()
     spark.sparkContext.setLogLevel("WARN")
+    lock = None
     try:
+        # Único escritor de bronze.technical_logs: comparte el lock con la retención de esa tabla.
+        lock = outbox_source.try_acquire_lock(spark, Settings.from_env(), outbox_source.LOCK_TECHNICAL_LOGS)
+        if lock is None:
+            log.warning("run_id=%s otro proceso escribe bronze.technical_logs (sp_getapplock '%s'): salgo",
+                        run_id, outbox_source.LOCK_TECHNICAL_LOGS)
+            return
+        moved = seal(paths)
+        log.info("run_id=%s sellados=%d %s", run_id, len(moved), moved)
         rows = ingest(spark, paths, run_id)
         total = spark.table(paths.table).count()
         archived = sorted(f for _, _, fs in os.walk(paths.archive) for f in fs)
@@ -167,6 +177,8 @@ def main() -> None:
         print(f"LOG_INGEST run_id={run_id} numInputRows={rows} bronze.technical_logs={total} "
               f"ready={sorted(os.listdir(paths.ready))} archivados={len(archived)} activos={active}")
     finally:
+        if lock is not None:
+            lock.close()
         spark.stop()
 
 

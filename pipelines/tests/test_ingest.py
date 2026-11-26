@@ -158,7 +158,8 @@ def test_second_ingestor_exits_before_reading(spark, settings, outbox, sql_conne
     seed_events(datetime.now(timezone.utc).replace(tzinfo=None), 3)
     runs_before = spark.table(settings.runs_table).count()
 
-    holder = outbox_source.try_acquire_ingestor_lock(spark, settings)  # simula un ingestor activo
+    # simula un ingestor activo
+    holder = outbox_source.try_acquire_lock(spark, settings, outbox_source.LOCK_AUDIT_EVENTS)
     assert holder is not None
     try:
         skipped = run(spark, settings)
@@ -202,7 +203,8 @@ def test_event_id_lookup_skips_files_of_other_days(spark, settings, outbox, seed
     total, scanned = _planned_files(spark, settings), _planned_files(spark, settings, lookup)
     print(f"\n[poda] búsqueda de 20 event_id del día {base.date() + timedelta(days=2)}: "
           f"archivos escaneados={scanned} de {total} archivos totales")
-    assert scanned == 1 < total
+    # 1 archivo nuevo por día; tras una compactación, el archivo compactado del mismo día puede solapar el rango.
+    assert scanned <= 2 and scanned * 10 < total
 
     metrics = spark.sql(f"""
         SELECT partition.occurred_at_day AS day, record_count,
