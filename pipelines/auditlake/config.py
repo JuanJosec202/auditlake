@@ -14,6 +14,9 @@ class Settings:
     fail_after_iceberg_commit: bool = False
     events_table: str = "bronze.audit_events"
     runs_table: str = "bronze.ingestion_runs"
+    # Hint de la lectura de la outbox (fase 6 compara variantes con y sin RCSI). Valores permitidos:
+    # "READPAST" (línea base), "READCOMMITTEDLOCK, READPAST" o "" (sin hint).
+    read_hint: str = "READPAST"
 
     @staticmethod
     def from_env() -> Settings:
@@ -23,4 +26,5 @@ class Settings:
             password=os.environ["OUTBOX_PASSWORD"],
             batch_size=int(os.environ.get("OUTBOX_BATCH_SIZE", "1000")),
             fail_after_iceberg_commit=os.environ.get("FAIL_AFTER_ICEBERG_COMMIT") == "1",
+            read_hint=os.environ.get("OUTBOX_READ_HINT", "READPAST"),
         )

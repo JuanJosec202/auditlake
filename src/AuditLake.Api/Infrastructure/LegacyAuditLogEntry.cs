@@ -14,4 +14,13 @@ public sealed class LegacyAuditLogEntry
     public Guid TransferId { get; private set; }
     public decimal Amount { get; private set; }
     public string ApprovedBy { get; private set; } = default!;
+
+    public static LegacyAuditLogEntry From(Domain.TransferApproved e) => new()
+    {
+        OccurredAt = e.ApprovedAt,
+        EventType = nameof(Domain.TransferApproved),
+        TransferId = e.TransferId,
+        Amount = e.Amount,
+        ApprovedBy = e.ApprovedBy,
+    };
 }

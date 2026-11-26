@@ -492,3 +492,6 @@ metastore_db/
 derby.log
 spark-warehouse/
 dbt/.user.yml
+
+# Resultados locales del benchmark
+pipelines/benchmarks/results/STOP

@@ -1,5 +1,6 @@
 using AuditLake.Api.Infrastructure;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace AuditLake.Api.Application;
 
@@ -11,7 +12,11 @@ public enum ApproveTransferResult
 }
 
 /// <summary>Aprueba una transferencia y registra TransferApproved en audit.Outbox en la misma transacción.</summary>
-public sealed class ApproveTransfer(AuditLakeDbContext db, TimeProvider clock, ILogger<ApproveTransfer>? logger = null)
+public sealed class ApproveTransfer(
+    AuditLakeDbContext db,
+    TimeProvider clock,
+    ILogger<ApproveTransfer>? logger = null,
+    IOptions<AuditOptions>? audit = null)
 {
     public async Task<ApproveTransferResult> ExecuteAsync(Guid transferId, string approvedBy, CancellationToken ct = default)
     {
@@ -28,7 +33,10 @@ public sealed class ApproveTransfer(AuditLakeDbContext db, TimeProvider clock, I
             return ApproveTransferResult.NotPending;
         }
 
-        db.Outbox.Add(OutboxMessage.Create(approved, approved.ApprovedAt));
+        if (audit?.Value.Sink == AuditSink.LegacyTable)
+            db.LegacyAuditLog.Add(LegacyAuditLogEntry.From(approved)); // solo benchmark complementario
+        else
+            db.Outbox.Add(OutboxMessage.Create(approved, approved.ApprovedAt));
 
         // Un solo SaveChangesAsync: UPDATE de la transferencia + INSERT en la outbox, o ninguno.
         await db.SaveChangesAsync(ct);

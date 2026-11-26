@@ -13,6 +13,7 @@ builder.Services.AddSerilog((services, lc) => lc.ReadFrom.Configuration(builder.
 builder.Services.AddDbContext<AuditLakeDbContext>(o =>
     o.UseSqlServer(builder.Configuration.GetConnectionString("AuditLake")));
 builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.Configure<AuditOptions>(builder.Configuration.GetSection(AuditOptions.Section));
 builder.Services.AddScoped<ApproveTransfer>();
 
 var app = builder.Build();

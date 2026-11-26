@@ -24,9 +24,17 @@ SELECT TOP ({n})
     CONVERT(datetime2(6), SWITCHOFFSET(OccurredAt, '+00:00')) AS occurred_at,
     Payload                                                   AS payload,
     PayloadHash                                               AS payload_hash
-FROM audit.Outbox WITH (READPAST)
+FROM audit.Outbox{hint}
 ORDER BY Id
 """
+READ_HINTS = {"READPAST": " WITH (READPAST)", "READCOMMITTEDLOCK, READPAST": " WITH (READCOMMITTEDLOCK, READPAST)",
+              "": ""}
+
+
+def batch_query(s: Settings) -> str:
+    if s.read_hint not in READ_HINTS:
+        raise ValueError(f"OUTBOX_READ_HINT no permitido: {s.read_hint!r}")
+    return _BATCH_QUERY.format(n=int(s.batch_size), hint=READ_HINTS[s.read_hint])
 
 
 def read_batch(spark: SparkSession, s: Settings) -> DataFrame:
@@ -36,7 +44,7 @@ def read_batch(spark: SparkSession, s: Settings) -> DataFrame:
         .option("url", s.jdbc_url)
         .option("user", s.user)
         .option("password", s.password)
-        .option("query", _BATCH_QUERY.format(n=int(s.batch_size)))
+        .option("query", batch_query(s))
         .option("sessionInitStatement", WORKER_SESSION_SETTINGS)
         .load()
         .cache()

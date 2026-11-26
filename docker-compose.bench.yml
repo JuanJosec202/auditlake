@@ -1,0 +1,21 @@
+# Límites de recursos para el benchmark (iguales en todos los escenarios). Proyecto aislado:
+#   docker compose -p auditlake-bench -f docker-compose.yml -f docker-compose.bench.yml ...
+# Host de la medición: i7-1360P (12 núcleos / 16 hilos), 15,7 GB RAM; Docker Desktop 27.0.3 con 16 CPU y 7,6 GiB.
+services:
+  sqlserver:
+    cpus: 2
+    mem_limit: 2560m
+  api:
+    cpus: 1
+    mem_limit: 512m
+  minio:
+    cpus: 1
+    mem_limit: 512m
+  iceberg-rest:
+    cpus: 1
+    mem_limit: 768m
+  spark:
+    cpus: 2
+    mem_limit: 2g
+    environment:
+      SPARK_DRIVER_MEMORY: 1g
