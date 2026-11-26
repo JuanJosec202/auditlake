@@ -1,0 +1,12 @@
+# Puertos de desarrollo. Se aplica explícitamente:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+services:
+  sqlserver:
+    ports:
+      - "14333:1433"   # 1433 en el host suele estar ocupado por un SQL Server local
+  api:
+    ports:
+      - "8080:8080"
+  iceberg-rest:
+    ports:
+      - "8181:8181"

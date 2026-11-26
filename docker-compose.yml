@@ -1,5 +1,11 @@
 name: auditlake
 
+# Compose base: sin puertos publicados, así varios proyectos (dev, demo, bench) conviven en el mismo host
+# con datos separados. Los puertos de desarrollo están en docker-compose.dev.yml:
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+# Demo (proyecto aislado):
+#   docker compose -p auditlake-demo run --build --rm spark python -m auditlake.demo
+
 services:
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-CU20-ubuntu-22.04
@@ -7,8 +13,6 @@ services:
       ACCEPT_EULA: "Y"
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD:?definir en .env}
-    ports:
-      - "14333:1433"   # 1433 en el host suele estar ocupado por un SQL Server local
     volumes:
       - sqldata:/var/opt/mssql
     healthcheck:
@@ -26,8 +30,6 @@ services:
       ASPNETCORE_URLS: http://+:8080
       ApplyMigrationsOnStartup: "true"
       ConnectionStrings__AuditLake: "Server=sqlserver,1433;Database=AuditLake;User Id=sa;Password=${MSSQL_SA_PASSWORD};TrustServerCertificate=True"
-    ports:
-      - "8080:8080"
     volumes:
       - ./data/logs:/app/logs     # hiper-logs Serilog (CLEF); los lee log_ingest
     depends_on:
@@ -73,8 +75,6 @@ services:
       AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
       AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
       AWS_REGION: us-east-1
-    ports:
-      - "8181:8181"
     volumes:
       - catalog:/home/iceberg
     depends_on:
@@ -102,10 +102,13 @@ services:
       - spark-checkpoints:/data/checkpoints
       - ./conf/local/spark-defaults.conf:/opt/spark/conf/spark-defaults.conf:ro
       - ./conf/local/maintenance.json:/opt/spark/conf/maintenance.json:ro
+      - ./sql:/sql:ro
     depends_on:
       sqlserver:
         condition: service_healthy
       iceberg-rest:
+        condition: service_started
+      api:
         condition: service_started
 
 volumes:

@@ -13,7 +13,8 @@ los modos de falla, las pruebas de aceptación y la estructura del README.
 - Python: outbox_source, audit_sink, log_ingest, main (--backfill), maintenance.py; conf/local y conf/aws
 - Iceberg: bronze.audit_events, bronze.technical_logs, bronze.ingestion_runs
 - dbt (dbt-spark, method: session): silver.audit_events, gold.audit_daily (vistas) + tests
-- Makefile: up, seed, ingest, chaos, dbt, demo, down
+- Sin Makefile: el punto de entrada es Docker Compose (base sin puertos; docker-compose.dev.yml para desarrollo;
+  demo: docker compose -p auditlake-demo run --build --rm spark python -m auditlake.demo)
 
 ## Fuera de alcance: no proponer
 Kafka, Debezium/CDC, Airflow, MediatR/CQRS, repositorio genérico sobre EF, varios proyectos .NET por capa,
@@ -72,4 +73,4 @@ Lake Formation local, buffer asíncrono en memoria, gold incremental, imagen de 
    condicionado, retención con bloqueo legal, expire_snapshots, huérfanos con file_list_view).
 6. Benchmark p95 y tamaños + comparación con y sin RCSI (contención medida, usando la evidencia de la fase 3 en docs/design.md):
    validar la lectura del worker con RCSI activo; si se quiere conservar el comportamiento de READPAST,
-   probar la variante WITH (READCOMMITTEDLOCK, READPAST) + make demo + README.
+   probar la variante WITH (READCOMMITTEDLOCK, READPAST) + demo con un comando de Compose + README.
