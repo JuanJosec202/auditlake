@@ -1,0 +1,58 @@
+{
+  "label": "baseline",
+  "n_per_run": 5000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.1,
+      "p95_ms": 28.6,
+      "max_ms": 66.3,
+      "run": 1,
+      "seconds": 10.4,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 13.1,
+      "p95_ms": 20.8,
+      "max_ms": 66.7,
+      "run": 2,
+      "seconds": 8.7,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.1,
+      "p95_ms": 91.7,
+      "max_ms": 287.1,
+      "run": 3,
+      "seconds": 16.1,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 13.4,
+      "p95_ms": 22.9,
+      "max_ms": 52.5,
+      "run": 4,
+      "seconds": 9.1,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 17.3,
+      "p95_ms": 67.2,
+      "max_ms": 335.8,
+      "run": 5,
+      "seconds": 14.4,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 28.6
+}

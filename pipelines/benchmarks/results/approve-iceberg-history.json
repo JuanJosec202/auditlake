@@ -1,0 +1,58 @@
+{
+  "label": "iceberg-history",
+  "n_per_run": 5000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 19.8,
+      "p95_ms": 38.7,
+      "max_ms": 90.2,
+      "run": 1,
+      "seconds": 13.8,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 18.7,
+      "p95_ms": 138.7,
+      "max_ms": 547.4,
+      "run": 2,
+      "seconds": 19.3,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.4,
+      "p95_ms": 24.1,
+      "max_ms": 81.3,
+      "run": 3,
+      "seconds": 10.7,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.4,
+      "p95_ms": 25.2,
+      "max_ms": 60.8,
+      "run": 4,
+      "seconds": 10.8,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 18.6,
+      "p95_ms": 120.4,
+      "max_ms": 361.9,
+      "run": 5,
+      "seconds": 18.6,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 38.7
+}

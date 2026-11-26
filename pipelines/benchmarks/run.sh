@@ -27,6 +27,7 @@ case "${1:-}" in
     go; $B query-sql --label sql & q=$!; sleep 20
     $B approve --label sql-history; halt; wait $q ;;
   iceberg)        # misma consulta en Iceberg (Spark) con el ingestor activo
+    $P restart iceberg-rest >/dev/null; sleep 8
     go; $B query-iceberg --label iceberg & q=$!; $B ingest-loop --label iceberg & i=$!; sleep 45
     $B approve --label iceberg-history; halt; wait $q $i ;;
   legacy-table)   # complementario: auditoría escrita en tabla SQL (legacy.AuditLog) en vez de outbox
@@ -36,7 +37,9 @@ case "${1:-}" in
   rcsi)           # rcsi <off|on> <READPAST|READCOMMITTEDLOCK, READPAST|none>
     state=$(echo "$2" | tr a-z A-Z); hint="$3"; [ "$hint" = none ] && hint=""
     label="rcsi-$2-$(echo "${3}" | tr -c 'a-zA-Z' '_' | tr A-Z a-z)"
-    sqlq -Q "ALTER DATABASE AuditLake SET READ_COMMITTED_SNAPSHOT $state WITH ROLLBACK IMMEDIATE"; sleep 5
+    sqlq -Q "ALTER DATABASE AuditLake SET READ_COMMITTED_SNAPSHOT $state WITH ROLLBACK IMMEDIATE"
+    # El catálogo local (iceberg-rest-fixture con SQLite) puede quedar con un lock tomado tras un commit fallido.
+    $P restart iceberg-rest >/dev/null; sleep 8
     go; $B waits --label "$label" & w=$!
     OUTBOX_READ_HINT="$hint" $B ingest-loop --label "$label" & i=$!; sleep 30
     $B approve --label "$label"; halt; wait $w $i ;;

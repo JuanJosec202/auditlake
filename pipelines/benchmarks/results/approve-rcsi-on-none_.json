@@ -1,0 +1,58 @@
+{
+  "label": "rcsi-on-none_",
+  "n_per_run": 5000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.7,
+      "p95_ms": 26.9,
+      "max_ms": 55.8,
+      "run": 1,
+      "seconds": 11.1,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.5,
+      "p95_ms": 30.5,
+      "max_ms": 374.6,
+      "run": 2,
+      "seconds": 12.4,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 17.9,
+      "p95_ms": 78.9,
+      "max_ms": 350.0,
+      "run": 3,
+      "seconds": 19.0,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.0,
+      "p95_ms": 23.3,
+      "max_ms": 63.2,
+      "run": 4,
+      "seconds": 10.4,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 17.9,
+      "p95_ms": 116.3,
+      "max_ms": 384.8,
+      "run": 5,
+      "seconds": 18.1,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 30.5
+}

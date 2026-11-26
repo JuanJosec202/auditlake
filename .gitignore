@@ -495,3 +495,4 @@ dbt/.user.yml
 
 # Resultados locales del benchmark
 pipelines/benchmarks/results/STOP
+pipelines/benchmarks/results/*.log

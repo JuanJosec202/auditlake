@@ -1,0 +1,9 @@
+{
+  "rcsi": false,
+  "samples": 548,
+  "samples_with_blocking": 2,
+  "max_blocked_sessions": 1,
+  "lock_wait_tasks": 0,
+  "lock_wait_ms": 0,
+  "by_type": []
+}

@@ -1,0 +1,58 @@
+{
+  "label": "rcsi-off-readpast_",
+  "n_per_run": 5000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.9,
+      "p95_ms": 126.6,
+      "max_ms": 468.4,
+      "run": 1,
+      "seconds": 18.0,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.0,
+      "p95_ms": 23.1,
+      "max_ms": 70.7,
+      "run": 2,
+      "seconds": 9.9,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.1,
+      "p95_ms": 35.4,
+      "max_ms": 264.6,
+      "run": 3,
+      "seconds": 12.2,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 14.5,
+      "p95_ms": 22.1,
+      "max_ms": 65.9,
+      "run": 4,
+      "seconds": 9.6,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.0,
+      "p95_ms": 21.5,
+      "max_ms": 47.1,
+      "run": 5,
+      "seconds": 9.7,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 23.1
+}

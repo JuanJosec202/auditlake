@@ -1,0 +1,58 @@
+{
+  "label": "sql-history",
+  "n_per_run": 5000,
+  "concurrency": 8,
+  "runs": [
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.5,
+      "p95_ms": 294.1,
+      "max_ms": 657.8,
+      "run": 1,
+      "seconds": 34.3,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 14.1,
+      "p95_ms": 290.5,
+      "max_ms": 1210.8,
+      "run": 2,
+      "seconds": 35.4,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 15.9,
+      "p95_ms": 283.6,
+      "max_ms": 512.4,
+      "run": 3,
+      "seconds": 35.0,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 16.2,
+      "p95_ms": 273.6,
+      "max_ms": 627.2,
+      "run": 4,
+      "seconds": 37.3,
+      "sample_errors": []
+    },
+    {
+      "requests": 5000,
+      "errors": 0,
+      "p50_ms": 13.5,
+      "p95_ms": 220.2,
+      "max_ms": 648.4,
+      "run": 5,
+      "seconds": 27.6,
+      "sample_errors": []
+    }
+  ],
+  "median_p95_ms": 283.6
+}

@@ -92,6 +92,10 @@ def approve(n: int, concurrency: int, runs: int, label: str) -> None:
         except Exception as exc:  # noqa: BLE001 - se cuentan como errores
             return None, str(exc)[:120]
 
+    # Calentamiento sin medir (JIT, pool de conexiones, planes en caché): 500 aprobaciones.
+    warm = [_post("/transfers", {"amount": 1})["id"] for _ in range(500)]
+    with ThreadPoolExecutor(max_workers=concurrency) as pool:
+        list(pool.map(one, warm))
     for r in range(runs):
         batch = ids[r * n:(r + 1) * n]
         t0 = time.time()
@@ -141,7 +145,7 @@ def query_loop(engine: str, label: str, max_seconds: int) -> None:
                 rs = conn.createStatement().executeQuery(SQL_QUERY)
                 rows = []
                 while rs.next():
-                    rows.append((rs.getString(1), rs.getLong(2), rs.getBigDecimal(3).toPlainString()))
+                    rows.append((rs.getString(1), rs.getLong(2), str(rs.getBigDecimal(3))))
                 return rows
             finally:
                 conn.close()
@@ -175,14 +179,21 @@ def ingest_loop(label: str, max_seconds: int) -> None:
     s = _settings()
     from auditlake.main import run
 
-    t_start, runs, archived = time.time(), 0, 0
+    t_start, runs, archived, failed, errors = time.time(), 0, 0, 0, []
     while time.time() - t_start < max_seconds and not os.path.exists(STOP):
-        r = run(spark, s)
+        try:
+            r = run(spark, s)
+        except Exception as exc:  # noqa: BLE001 - como en operación: la corrida falla y la siguiente reintenta
+            failed += 1
+            errors.append(str(exc).splitlines()[0][:160])
+            time.sleep(2)
+            continue
         runs += 1
         archived += r.deleted
         if r.read_count == 0:
             time.sleep(2)
-    _save(f"ingest-{label}", {"runs": runs, "archived": archived, "read_hint": s.read_hint})
+    _save(f"ingest-{label}", {"runs_ok": runs, "runs_failed": failed, "archived": archived,
+                              "read_hint": s.read_hint, "sample_errors": sorted(set(errors))[:3]})
     spark.stop()
 
 
@@ -223,9 +234,9 @@ def main(argv: Optional[list] = None) -> None:
     p = argparse.ArgumentParser(prog="bench")
     p.add_argument("command", choices=["approve", "query-sql", "query-iceberg", "ingest-loop", "waits"])
     p.add_argument("--label", required=True)
-    p.add_argument("--n", type=int, default=3000)
-    p.add_argument("--concurrency", type=int, default=16)
-    p.add_argument("--runs", type=int, default=3)
+    p.add_argument("--n", type=int, default=5000)
+    p.add_argument("--concurrency", type=int, default=8)
+    p.add_argument("--runs", type=int, default=5)
     p.add_argument("--max-seconds", type=int, default=900)
     a = p.parse_args(argv)
     if a.command == "approve":

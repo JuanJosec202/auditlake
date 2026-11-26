@@ -6,7 +6,7 @@ services:
     cpus: 2
     mem_limit: 2560m
   api:
-    cpus: 1
+    cpus: 2
     mem_limit: 512m
   minio:
     cpus: 1
@@ -16,6 +16,8 @@ services:
     mem_limit: 768m
   spark:
     cpus: 2
-    mem_limit: 2g
+    mem_limit: 3g
     environment:
-      SPARK_DRIVER_MEMORY: 1g
+      SPARK_DRIVER_MEMORY: 1536m
+      # Spark ve los 16 CPU del host aunque el contenedor tenga cuota de 2: alinear los hilos con el límite.
+      PYSPARK_SUBMIT_ARGS: "--master local[2] --conf spark.sql.shuffle.partitions=8 pyspark-shell"
