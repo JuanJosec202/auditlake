@@ -1,0 +1,18 @@
+{
+  "retention_days": {
+    "bronze.audit_events": 365,
+    "bronze.technical_logs": 30
+  },
+  "legal_holds": [
+    {
+      "table": "bronze.audit_events",
+      "event_id": "01990525-fe00-7bcf-8bc1-28163583a2b6",
+      "reason": "demo: bloqueo legal (en producción vendría de una fuente gobernada)",
+      "until": null
+    }
+  ],
+  "snapshot_max_age_hours": 0,
+  "snapshot_retain_last": 1,
+  "rewrite_manifests_min_manifests": 50,
+  "orphan_older_than_days": 3
+}
