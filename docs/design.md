@@ -289,24 +289,53 @@ reservados (datos 114.352 KB, índices 24.512 KB) frente a 89.832.683 bytes (85,
 bronze.audit_events para ese rango, ya compactado (zstd), aunque bronze guarda además el payload JSON como
 texto (141 MB sin comprimir), event_id y payload_hash.
 
-**Costo estimado** (estimación, no medición; tarifas us-east-1 de la AWS Price List API, publicación del
-25-11-2026, consultadas el 26-11-2026): S3 Standard 0,023 USD/GB-mes, PUT 0,005 USD/1.000, GET 0,0004 USD/1.000;
-Glue ETL (Glue 5) 0,44 USD/DPU-hora con mínimo de 1 minuto por corrida; Glue Data Catalog 1 USD por 100.000
-objetos sobre 1 millón y 1 USD por millón de solicitudes sobre 1 millón; Athena 5 USD/TB escaneado.
+**Costo estimado** (estimación, no medición). Tarifas us-east-1 de la AWS Price List API, consultadas el
+26-11-2026: AmazonS3 (publicación 25-11-2026) S3 Standard 0,023 USD/GB-mes, PUT 0,005 USD/1.000, GET
+0,0004 USD/1.000; AWSGlue (25-11-2026) ETL 0,44 USD/DPU-hora (Glue 5; mínimo de 1 minuto por corrida), Data
+Catalog 1 USD por 100.000 objetos sobre 1 millón y 1 USD por millón de solicitudes sobre 1 millón; AmazonAthena
+(20-11-2026) 5 USD/TB escaneado; AmazonRDS (24-11-2026) RDS for SQL Server gp3 0,115 USD/GB-mes Single-AZ y
+0,23 USD/GB-mes Multi-AZ, backup 0,095 USD/GB-mes por encima de la asignación gratuita (igual al almacenamiento
+aprovisionado). Los GB se calculan como GiB.
 
-| Concepto | Supuesto | USD por millón de eventos retenidos, por mes |
+Mismo histórico (1.000.040 eventos, medidos antes de purgar): SQL 141.648 KB reservados = 0,135 GiB; Iceberg
+89.832.683 bytes = 0,084 GiB (compresión observada ~1,6x, con el payload JSON completo en bronze).
+
+| Almacenamiento del mismo histórico, por mes | SQL Server (RDS) | Iceberg (S3) |
 |---|---|---|
-| S3 (bronze) | 0,0898 GB medidos por millón | 0,002 |
-| SQL residual | outbox de minutos; el histórico deja de crecer en SQL | ~0 (libera ~0,14 GB por millón y por copia: datos, índices, respaldos) |
-| Glue Catalog | pocas tablas y particiones; < 1 M de objetos y solicitudes | 0 (capa gratuita) |
-| Consultas (Athena) | 100 escaneos completos al mes de ese millón (0,09 GB c/u) | 0,045 |
+| Single-AZ, sin backup cobrado | 0,135 × 0,115 = 0,016 USD | 0,084 × 0,023 = 0,002 USD |
+| Multi-AZ + una copia de backup cobrada | 0,135 × (0,23 + 0,095) = 0,044 USD | 0,002 USD |
 
-Costos que no escalan por millón y dominan a este volumen: el job de ingesta en Glue cada 5 minutos con
-2 DPU y el mínimo de 1 minuto = 8.640 corridas × 2/60 DPU-h ≈ 288 DPU-h ≈ 127 USD/mes; el mantenimiento diario
-(1 minuto, 2 DPU) ≈ 0,44 USD/mes; PUT de commits (~5 por corrida) ≈ 0,22 USD/mes. El cómputo variable de
-cargar un millón de eventos es pequeño: el backfill local cargó 663.070 eventos nuevos en 110 s con 2 CPU.
-El SQL residual no se tarifó en USD: el precio de gp3 de la página de EBS aparece solo en un ejemplo sin
-región, y el ahorro relevante del core (buffer pool, IO, respaldos, licencias por núcleo) no es lineal por GB.
+Por millón de eventos retenidos el almacenamiento en SQL cuesta entre 0,016 y 0,044 USD/mes y en S3 0,002
+USD/mes. La diferencia por millón es grande (8 a 23 veces), pero en valor absoluto es pequeña por millón; el ahorro
+de almacenamiento no es el argumento principal. Otros costos por millón: Glue Catalog 0 (capa gratuita con
+pocas tablas y particiones) y consultas en Athena 0,045 USD con 100 escaneos completos de ese millón al mes.
+
+**Job de Glue: sensibilidad a la frecuencia** (2 DPU, mínimo de 1 minuto por corrida, 30 días; el lote cabe en
+ese minuto a estos volúmenes). La outbox medida ocupa ~0,48 GiB por millón de eventos pendientes (20.500 filas
+= 10.264 KB, payload NVARCHAR de 277 bytes en promedio). Tamaño esperado como pico justo antes de cada corrida,
+con 1 millón de eventos por día (escala lineal con el volumen):
+
+| Frecuencia | Corridas/mes | DPU-hora/mes | USD/mes | Eventos pendientes (pico) | Outbox (pico) | Equilibrio por almacenamiento |
+|---|---|---|---|---|---|---|
+| 5 min | 8.640 | 288 | 126,72 | ~3.500 | ~1,7 MB | ~3.000 M de eventos retenidos |
+| 15 min | 2.880 | 96 | 42,24 | ~10.400 | ~5,1 MB | ~1.000 M |
+| 60 min | 720 | 24 | 10,56 | ~41.700 | ~20,4 MB | ~250 M |
+
+El equilibrio es el volumen retenido a partir del cual el almacenamiento que deja de pagarse en SQL (Multi-AZ +
+backup: 0,044 − 0,002 = 0,042 USD por millón al mes) compensa el costo fijo del job; con Single-AZ sin backup
+cobrado (0,014 USD por millón) se triplica. Con 1 millón de eventos por día (30 M al mes) el job horario se
+compensa por almacenamiento en ~8 meses y el de 5 minutos no se compensa en un horizonte razonable solo por
+almacenamiento. Por eso la frecuencia se elige por la frescura que necesita negocio y el tamaño de outbox
+aceptable, y el valor del diseño se mide en el core: p95 de 283,6 ms con la analítica en SQL frente a 38,7 ms
+con el histórico en Iceberg, y un SQL que deja de crecer. No se tarifaron licencias por núcleo, IO ni buffer
+pool del SQL, que no escalan linealmente por GB.
+
+**Limitaciones del entorno local**: (1) la lectura vectorizada de Iceberg está desactivada en conf/local porque
+con ~1M de filas tumbaba la JVM de Spark (SIGSEGV en Java 11.0.25 y 17.0.13); en AWS el job corre en el runtime
+de Glue 5 y la decisión se revalida allí. (2) El catálogo local es iceberg-rest-fixture sobre SQLite: con
+commits concurrentes devolvió 500 (SQLITE_BUSY) y a veces quedó bloqueado hasta reiniciarlo; el ingestor falla
+sin borrar de SQL y el reintento no duplica. En AWS se usa Glue Data Catalog, por lo que esta limitación no
+aplica. Ninguna de las dos afecta la corrección: solo el entorno de prueba.
 
 **Particionamiento**: tras compactar hay 1 archivo por partición diaria, de ~477 KB (mín. 487.423 B, mediana
 488.288 B, máx. 488.884 B) para ~5.435 eventos por día; por mes serían ~14–15 MB (6 archivos en el rango). Con
